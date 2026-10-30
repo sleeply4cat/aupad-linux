@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Fri, 30 Oct 2026 22:04:35 +0300
+Subject: [PATCH 8/9] arm64: dts: qcom: pm6125: add PWM
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ arch/arm64/boot/dts/qcom/pm6125.dtsi | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/pm6125.dtsi b/arch/arm64/boot/dts/qcom/pm6125.dtsi
+index cb067adb7..529a14a02 100644
+--- a/arch/arm64/boot/dts/qcom/pm6125.dtsi
++++ b/arch/arm64/boot/dts/qcom/pm6125.dtsi
+@@ -154,5 +154,13 @@ pm6125_gpios: gpio@c000 {
+ 	pmic@1 {
+ 		compatible = "qcom,pm6125", "qcom,spmi-pmic";
+ 		reg = <0x1 SPMI_USID>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		pm6125_pwm: pwm {
++			compatible = "qcom,pm6125-pwm";
++			#pwm-cells = <2>;
++			status = "disabled";
++		};
+ 	};
+ };

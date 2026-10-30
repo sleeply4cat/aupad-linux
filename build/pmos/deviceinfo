@@ -1,0 +1,9 @@
+# Stopgap until there is a device-chuwi-aupad package
+deviceinfo_format_version="0"
+deviceinfo_name="CHUWI AuPad"
+deviceinfo_manufacturer="CHUWI"
+deviceinfo_codename="chuwi-aupad"
+deviceinfo_arch="aarch64"
+deviceinfo_chassis="tablet"
+deviceinfo_flash_method="none"
+deviceinfo_rootfs_image_sector_size="4096"

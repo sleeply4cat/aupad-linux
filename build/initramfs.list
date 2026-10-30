@@ -1,0 +1,17 @@
+dir /dev 0755 0 0
+nod /dev/console 0600 0 0 c 5 1
+dir /bin 0755 0 0
+dir /proc 0755 0 0
+dir /sys 0755 0 0
+dir /tmp 1777 0 0
+dir /mnt 0755 0 0
+file /bin/busybox ${AUPAD_BUILD}/initramfs/busybox 0755 0 0
+file /init ${AUPAD_BUILD}/initramfs/init 0755 0 0
+file /bin/rx ${AUPAD_BUILD}/tests/rx 0755 0 0
+file /bin/rb ${AUPAD_BUILD}/tests/rb 0755 0 0
+file /bin/flash ${AUPAD_BUILD}/tests/flash.sh 0755 0 0
+file /bin/flashroot ${AUPAD_BUILD}/tests/flashroot.sh 0755 0 0
+file /bin/t-bcbclr ${AUPAD_BUILD}/tests/bcbclr.sh 0755 0 0
+file /bin/misc.head ${AUPAD_BUILD}/tests/misc.head 0644 0 0
+file /bin/t-stage2 ${AUPAD_BUILD}/tests/stage2.sh 0755 0 0
+file /bin/authorized_keys ${AUPAD_BUILD}/tests/authorized_keys 0644 0 0

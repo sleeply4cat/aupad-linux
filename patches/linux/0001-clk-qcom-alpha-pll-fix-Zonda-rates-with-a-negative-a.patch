@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Fri, 30 Oct 2026 22:04:34 +0300
+Subject: [PATCH 1/9] clk: qcom: alpha-pll: fix Zonda rates with a negative
+ alpha
+
+zonda_pll_adjust_l_val() computes the quotient, then stores the rate in L,
+so any rate with the alpha MSB set programs a garbage L. The PLL fails to
+lock: on SM6225 gpu_cc_pll0 at 1200 MHz takes the SoC down.
+
+The alpha is signed in that case, and recalc_rate ignored that as well.
+Add a Zonda recalc_rate, as the downstream driver has.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ drivers/clk/qcom/clk-alpha-pll.c | 28 ++++++++++++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+index f8313f9d0..4adb1344d 100644
+--- a/drivers/clk/qcom/clk-alpha-pll.c
++++ b/drivers/clk/qcom/clk-alpha-pll.c
+@@ -2271,7 +2271,31 @@ static void zonda_pll_adjust_l_val(unsigned long rate, unsigned long prate, u32
+ 	quotient = rate;
+ 	remainder = do_div(quotient, prate);
+ 
+-	*l = rate + (u32)(remainder * 2 >= prate);
++	*l = quotient + (u32)(remainder * 2 >= prate);
++}
++
++/* With its MSB set, Zonda's alpha is negative: the rate is below L, see zonda_pll_adjust_l_val() */
++static unsigned long
++clk_zonda_pll_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
++{
++	struct clk_alpha_pll *pll = to_clk_alpha_pll(hw);
++	u32 l, frac, alpha_width = pll_alpha_width(pll);
++	u64 tmp;
++
++	if (regmap_read(pll->clkr.regmap, PLL_L_VAL(pll), &l))
++		return 0;
++
++	if (regmap_read(pll->clkr.regmap, PLL_ALPHA_VAL(pll), &frac))
++		return 0;
++
++	if (!(frac & PLL_ALPHA_MSB))
++		return alpha_pll_calc_rate(parent_rate, l, frac, alpha_width);
++
++	tmp = parent_rate;
++	tmp *= BIT(alpha_width) - frac;
++	tmp >>= alpha_width;
++
++	return parent_rate * l - tmp;
+ }
+ 
+ static int clk_zonda_pll_set_rate(struct clk_hw *hw, unsigned long rate,
+@@ -2322,7 +2346,7 @@ const struct clk_ops clk_alpha_pll_zonda_ops = {
+ 	.enable = clk_zonda_pll_enable,
+ 	.disable = clk_zonda_pll_disable,
+ 	.is_enabled = clk_trion_pll_is_enabled,
+-	.recalc_rate = clk_trion_pll_recalc_rate,
++	.recalc_rate = clk_zonda_pll_recalc_rate,
+ 	.determine_rate = clk_alpha_pll_determine_rate,
+ 	.set_rate = clk_zonda_pll_set_rate,
+ };

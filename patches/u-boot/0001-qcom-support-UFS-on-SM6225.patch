@@ -1,0 +1,185 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Fri, 30 Oct 2026 22:06:46 +0300
+Subject: [PATCH 1/2] qcom: support UFS on SM6225
+
+Add the SM6225 UFS PHY tables, the second RX symbol clock and the GDSC, and the
+ufs_reset special pin, so U-Boot can load a kernel from UFS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ drivers/clk/qcom/clock-sm6115.c       |  5 ++
+ drivers/phy/qcom/phy-qcom-qmp-ufs.c   | 92 +++++++++++++++++++++++++++
+ drivers/pinctrl/qcom/pinctrl-sm6115.c |  6 ++
+ 3 files changed, 103 insertions(+)
+
+diff --git a/drivers/clk/qcom/clock-sm6115.c b/drivers/clk/qcom/clock-sm6115.c
+index 17c2e561..dd21a834 100644
+--- a/drivers/clk/qcom/clock-sm6115.c
++++ b/drivers/clk/qcom/clock-sm6115.c
+@@ -16,6 +16,9 @@
+ 
+ #include "clock-qcom.h"
+ 
++/* Second UFS lane: SM6225 only, not in the SM6115 bindings */
++#define GCC_UFS_PHY_RX_SYMBOL_1_CLK 167
++
+ #define QUPV3_WRAP0_S4_CMD_RCGR 0x1f608
+ #define SDCC1_APPS_CLK_CMD_RCGR 0x38028
+ #define SDCC2_APPS_CLK_CMD_RCGR 0x1e00c
+@@ -82,6 +85,7 @@ static const struct gate_clk sm6115_clks[] = {
+ 	GATE_CLK(GCC_UFS_PHY_ICE_CORE_CLK, 0x45044, 0x00000001),
+ 	GATE_CLK(GCC_UFS_PHY_PHY_AUX_CLK, 0x45078, 0x00000001),
+ 	GATE_CLK(GCC_UFS_PHY_RX_SYMBOL_0_CLK, 0x4501c, 0x00000001),
++	GATE_CLK(GCC_UFS_PHY_RX_SYMBOL_1_CLK, 0x4509c, 0x00000001),
+ 	GATE_CLK(GCC_UFS_PHY_TX_SYMBOL_0_CLK, 0x45018, 0x00000001),
+ 	GATE_CLK(GCC_UFS_PHY_UNIPRO_CORE_CLK, 0x45040, 0x00000001),
+ 	GATE_CLK(GCC_USB30_PRIM_MASTER_CLK, 0x1a010, 0x00000001),
+@@ -165,6 +169,7 @@ static const struct qcom_reset_map sm6115_gcc_resets[] = {
+ };
+ 
+ static const struct qcom_power_map sm6115_gdscs[] = {
++	[GCC_UFS_PHY_GDSC] = { 0x45004 },
+ 	[GCC_USB30_PRIM_GDSC] = { 0x1a004 },
+ };
+ 
+diff --git a/drivers/phy/qcom/phy-qcom-qmp-ufs.c b/drivers/phy/qcom/phy-qcom-qmp-ufs.c
+index 35fa38a5..3ecc14e0 100644
+--- a/drivers/phy/qcom/phy-qcom-qmp-ufs.c
++++ b/drivers/phy/qcom/phy-qcom-qmp-ufs.c
+@@ -813,6 +813,69 @@ static const struct qmp_ufs_init_tbl sc7280_ufsphy_hs_g4_rx[] = {
+ 	QMP_PHY_INIT_CFG(QSERDES_V4_RX_GM_CAL, 0x0f),
+ };
+ 
++static const struct qmp_ufs_init_tbl sm6225_ufsphy_tx[] = {
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_PWM_GEAR_1_DIVIDER_BAND0_1, 0x06),
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_PWM_GEAR_2_DIVIDER_BAND0_1, 0x03),
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_PWM_GEAR_3_DIVIDER_BAND0_1, 0x01),
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_PWM_GEAR_4_DIVIDER_BAND0_1, 0x00),
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_LANE_MODE_1, 0x35),
++	QMP_PHY_INIT_CFG(QSERDES_V4_TX_TRAN_DRVR_EMP_EN, 0x0c),
++};
++
++static const struct qmp_ufs_init_tbl sm6225_ufsphy_rx[] = {
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_SIGDET_LVL, 0x24),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_SIGDET_CNTRL, 0x0f),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_SIGDET_DEGLITCH_CNTRL, 0x1e),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_BAND, 0x18),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_FASTLOCK_FO_GAIN, 0x0a),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_SO_SATURATION_AND_ENABLE, 0x5a),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_PI_CONTROLS, 0xf1),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_FASTLOCK_COUNT_LOW, 0x80),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_PI_CTRL2, 0x80),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_FO_GAIN, 0x0e),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_UCDR_SO_GAIN, 0x04),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_TERM_BW, 0x1b),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQU_ADAPTOR_CNTRL2, 0x06),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQU_ADAPTOR_CNTRL3, 0x04),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_EQU_ADAPTOR_CNTRL4, 0x1d),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_OFFSET_ADAPTOR_CNTRL2, 0x00),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_IDAC_MEASURE_TIME, 0x10),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_IDAC_TSETTLE_LOW, 0xc0),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_IDAC_TSETTLE_HIGH, 0x00),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_LOW, 0x6d),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH, 0x6d),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH2, 0xed),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH3, 0x3b),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_00_HIGH4, 0x3c),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_LOW, 0x6d),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH, 0x6d),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH2, 0xed),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH3, 0x3b),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_01_HIGH4, 0x3c),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_LOW, 0xe0),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH, 0xc8),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH2, 0xc8),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH3, 0x3b),
++	QMP_PHY_INIT_CFG(QSERDES_V4_RX_RX_MODE_10_HIGH4, 0xb1),
++};
++
++static const struct qmp_ufs_init_tbl sm6225_ufsphy_pcs[] = {
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_RX_SIGDET_CTRL2, 0x6d),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TX_LARGE_AMP_DRV_LVL, 0x0a),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TX_SMALL_AMP_DRV_LVL, 0x02),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TX_MID_TERM_CTRL1, 0x43),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_DEBUG_BUS_CLKSEL, 0x1f),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_RX_MIN_HIBERN8_TIME, 0xff),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_MULTI_LANE_CTRL1, 0x02),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TIMER_20US_CORECLK_STEPS_MSB, 0x16),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TIMER_20US_CORECLK_STEPS_LSB, 0xd8),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_PLL_CNTL, 0x03),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TX_HSGEAR_CAPABILITY, 0x03),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_RX_HSGEAR_CAPABILITY, 0x03),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TX_PWM_GEAR_BAND, 0xaa),
++	QMP_PHY_INIT_CFG(QPHY_V4_PCS_UFS_TX_HS_GEAR_BAND, 0x06),
++};
++
+ static const struct qmp_ufs_init_tbl sm6115_ufsphy_serdes[] = {
+ 	QMP_PHY_INIT_CFG(QSERDES_COM_CMN_CONFIG, 0x0e),
+ 	QMP_PHY_INIT_CFG(QSERDES_COM_SYSCLK_EN_SEL, 0x14),
+@@ -1324,6 +1387,34 @@ static const struct qmp_ufs_cfg sa8775p_ufsphy_cfg = {
+ 	.regs			= ufsphy_v5_regs_layout,
+ };
+ 
++static const struct qmp_ufs_cfg sm6225_ufsphy_cfg = {
++	.lanes			= 2,
++
++	.offsets		= &qmp_ufs_offsets,
++
++	.tbls = {
++		.serdes		= sm8150_ufsphy_serdes,
++		.serdes_num	= ARRAY_SIZE(sm8150_ufsphy_serdes),
++		.tx		= sm6225_ufsphy_tx,
++		.tx_num		= ARRAY_SIZE(sm6225_ufsphy_tx),
++		.rx		= sm6225_ufsphy_rx,
++		.rx_num		= ARRAY_SIZE(sm6225_ufsphy_rx),
++		.pcs		= sm6225_ufsphy_pcs,
++		.pcs_num	= ARRAY_SIZE(sm6225_ufsphy_pcs),
++	},
++	.tbls_hs_b = {
++		.serdes		= sm8150_ufsphy_hs_b_serdes,
++		.serdes_num	= ARRAY_SIZE(sm8150_ufsphy_hs_b_serdes),
++	},
++	.clk_list		= sdm845_ufs_phy_clk_l,
++	.num_clks		= ARRAY_SIZE(sdm845_ufs_phy_clk_l),
++	.vreg_list		= qmp_ufs_vreg_l,
++	.num_vregs		= ARRAY_SIZE(qmp_ufs_vreg_l),
++	.regs			= ufsphy_v4_regs_layout,
++
++	.no_pcs_sw_reset	= false,
++};
++
+ static const struct qmp_ufs_cfg sm6115_ufsphy_cfg = {
+ 	.lanes			= 1,
+ 
+@@ -1743,6 +1834,7 @@ static const struct udevice_id qmp_ufs_ids[] = {
+ 	{ .compatible = "qcom,sdm845-qmp-ufs-phy", .data = (ulong)&sdm845_ufsphy_cfg },
+ 	{ .compatible = "qcom,sm6115-qmp-ufs-phy", .data = (ulong)&sm6115_ufsphy_cfg, },
+ 	{ .compatible = "qcom,sm6125-qmp-ufs-phy", .data = (ulong)&sm6115_ufsphy_cfg, },
++	{ .compatible = "qcom,sm6225-qmp-ufs-phy", .data = (ulong)&sm6225_ufsphy_cfg, },
+ 	{ .compatible = "qcom,sm6350-qmp-ufs-phy", .data = (ulong)&sdm845_ufsphy_cfg },
+ 	{ .compatible = "qcom,sm7150-qmp-ufs-phy", .data = (ulong)&sm7150_ufsphy_cfg },
+ 	{ .compatible = "qcom,sm8150-qmp-ufs-phy", .data = (ulong)&sm8150_ufsphy_cfg },
+diff --git a/drivers/pinctrl/qcom/pinctrl-sm6115.c b/drivers/pinctrl/qcom/pinctrl-sm6115.c
+index 7e80ea39..bf5f4324 100644
+--- a/drivers/pinctrl/qcom/pinctrl-sm6115.c
++++ b/drivers/pinctrl/qcom/pinctrl-sm6115.c
+@@ -172,11 +172,17 @@ static int sm6115_get_function_mux(__maybe_unused unsigned int pin, unsigned int
+ 	return msm_pinctrl_functions[selector].val;
+ }
+ 
++static const struct msm_special_pin_data sm6115_special_pins_data[] = {
++	[0] = { .name = "ufs_reset", .ctl_reg = 0x78000, .io_reg = 0x78004,
++		.pull_bit = 3, .drv_bit = 0, .oe_bit = 31, .in_bit = 31, .out_bit = 0 },
++};
++
+ struct msm_pinctrl_data sm6115_data = {
+ 	.pin_data = {
+ 		.pin_offsets = sm6115_pin_offsets,
+ 		.pin_count = ARRAY_SIZE(sm6115_pin_offsets),
+ 		.special_pins_start = 113,
++		.special_pins_data = sm6115_special_pins_data,
+ 	},
+ 	.functions_count = ARRAY_SIZE(msm_pinctrl_functions),
+ 	.get_function_name = sm6115_get_function_name,

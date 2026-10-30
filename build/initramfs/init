@@ -1,0 +1,86 @@
+#!/bin/busybox sh
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+
+echo "=== AuPad mainline initramfs: $(uname -r), $(grep -c ^processor /proc/cpuinfo) cpus ===" > /dev/kmsg
+grep MemTotal /proc/meminfo > /dev/kmsg
+
+# USB gadget: ACM serial (ttyGS0, second shell) + NCM network (usb0, 172.16.42.1)
+gadget() {
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    G=/sys/kernel/config/usb_gadget/g1
+    mkdir -p $G && cd $G || return
+    echo 0x18d1 > idVendor; echo 0xd001 > idProduct
+    mkdir -p strings/0x409
+    echo CHUWI > strings/0x409/manufacturer; echo "AuPad mainline" > strings/0x409/product
+    echo aupad > strings/0x409/serialnumber
+    mkdir -p functions/acm.0 functions/ncm.0 configs/c.1/strings/0x409
+    # Fixed MACs: host interface is enx02aa55000001, tablet is fe80::2aa:55ff:fe00:2
+    echo 02:aa:55:00:00:01 > functions/ncm.0/host_addr
+    echo 00:aa:55:00:00:02 > functions/ncm.0/dev_addr
+    echo "acm+ncm" > configs/c.1/strings/0x409/configuration
+    ln -s functions/acm.0 configs/c.1/; ln -s functions/ncm.0 configs/c.1/
+    UDC=$(ls /sys/class/udc | head -1)
+    [ -n "$UDC" ] && echo $UDC > UDC && echo "gadget bound to $UDC" > /dev/kmsg
+    cd /
+    ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null
+    [ -c /dev/ttyGS0 ] && (while true; do setsid sh -l </dev/ttyGS0 >/dev/ttyGS0 2>&1; sleep 1; done) &
+}
+for i in 1 2 3 4 5; do [ -n "$(ls /sys/class/udc 2>/dev/null)" ] && break; sleep 1; done
+gadget
+
+# test=<name> on the cmdline runs /bin/t-<name> (built from build/tests/) before the shell
+T=$(sed -n 's/.*test=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$T" ] && [ -x /bin/t-$T ]; then
+    echo "TESTSTART $T" > /dev/kmsg
+    /bin/t-$T 2>&1 | while read l; do echo "T: $l" > /dev/kmsg; done
+    echo "TESTDONE $T" > /dev/kmsg
+fi
+
+# root=pmos on the cmdline: hand over to the rootfs.  Stay here if that isn't possible.
+if grep -q 'root=pmos' /proc/cmdline; then
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        u=$(grep -l '^PARTNAME=pmos$' /sys/class/block/sd*/uevent 2>/dev/null) && break
+        sleep 1
+    done
+    n=$(basename "$(dirname "$u")")
+    blockdev --setrw /dev/${n%%[0-9]*}; blockdev --setrw /dev/$n
+    if [ -n "$n" ] && mount -t ext4 /dev/$n /mnt && [ -x /mnt/sbin/init ]; then
+        echo "switching to /dev/$n" > /dev/kmsg
+        fuser -k /dev/ttyGS0 2>/dev/null
+        for m in proc sys dev; do mount --move /$m /mnt/$m; done
+        exec switch_root /mnt /sbin/init
+    fi
+    echo "root=pmos failed, staying in initramfs" > /dev/kmsg
+    umount /mnt 2>/dev/null
+fi
+
+# flash loader: the host pushes a boot image (build/fl.sh), which lands in recovery_b and boots
+(while true; do
+    rx 5555 /tmp/new.img && flash /tmp/new.img
+    rm -f /tmp/new.img
+done) &
+# same for the rootfs (build/flr.sh): it lands in the pmos partition
+(while true; do
+    rx 5556 /tmp/root.img && flashroot /tmp/root.img
+    rm -f /tmp/root.img
+done) &
+
+if [ -c /dev/ttyMSM0 ]; then
+    while true; do
+        setsid -c sh -l </dev/ttyMSM0 >/dev/ttyMSM0 2>&1
+        sleep 1
+    done
+fi
+
+# no real console: show we are alive in the earlycon log, then reboot (back to fastboot with VOL- held)
+for i in 0 10 20 30 40 50 60 70 80; do
+    echo "initramfs alive $i" > /dev/kmsg
+    sleep 10
+done
+echo "initramfs: rebooting" > /dev/kmsg
+reboot -f

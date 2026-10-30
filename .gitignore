@@ -1,0 +1,26 @@
+# Sources you clone yourself, see README
+/linux/
+/u-boot/
+/venv/
+__pycache__/
+# Build output and anything taken from the device
+/build/out/
+/build/uboot/
+/build/*.img
+/build/initramfs.cpio.gz
+/build/initramfs/busybox
+/build/tests/rx
+/build/tests/rb
+/build/tests/authorized_keys
+/build/pmos/cache/
+/build/pmos/dl/
+/build/pmos/keys/
+/build/pmos/rootfs.img
+/build/pmos/mk.fr
+/firmware/
+/logs/
+/src/
+stub/*.o
+stub/*.elf
+stub/*.bin
+stub/stub+Image

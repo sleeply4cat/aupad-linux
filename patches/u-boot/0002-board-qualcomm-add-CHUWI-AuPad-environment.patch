@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Fri, 30 Oct 2026 22:06:46 +0300
+Subject: [PATCH 2/2] board: qualcomm: add CHUWI AuPad environment
+
+Boot /boot/boot.img from the pmos partition, fall back to fastboot.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ board/qualcomm/aupad.env | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+ create mode 100644 board/qualcomm/aupad.env
+
+diff --git a/board/qualcomm/aupad.env b/board/qualcomm/aupad.env
+new file mode 100644
+index 00000000..391eeec1
+--- /dev/null
++++ b/board/qualcomm/aupad.env
+@@ -0,0 +1,8 @@
++bootdelay=1
++bootretry=-1
++stdin=serial
++stdout=serial,vidconsole
++stderr=serial,vidconsole
++fastboot=fastboot -l 0x805ff000 usb 0
++pmos=scsi scan && ext4load scsi 0:b 0x805ff000 /boot/boot.img && bootm 0x805ff000
++bootcmd=run pmos; run fastboot
