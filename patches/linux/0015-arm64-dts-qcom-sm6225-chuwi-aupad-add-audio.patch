@@ -1,0 +1,490 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 01:59:27 +0300
+Subject: [PATCH 15/15] arm64: dts: qcom: sm6225-chuwi-aupad: add audio
+
+The ADSP runs AudioReach, so replace sm6115's APR services with GPR.
+Add the RX, TX and VA macros, both SoundWire masters and the static
+audio PD heap, and on the board the WCD9370 and two AW87xxx amps.
+
+Only the DCODEC resource vote works: the firmware fails the LPASS core
+vote. HPH data stays on the second RX lane, and ADC1/2 use TX master
+port 2 as on stock. Each amp drives two speakers: left is the top pair,
+right the bottom pair.
+
+Also drop a duplicated gpio-keys node and includes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ .../boot/dts/qcom/sm6225-chuwi-aupad.dts      | 172 +++++++++++++-
+ arch/arm64/boot/dts/qcom/sm6225.dtsi          | 215 ++++++++++++++++++
+ 2 files changed, 375 insertions(+), 12 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+index 24faa0bf6..1411f8a24 100644
+--- a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
++++ b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+@@ -3,11 +3,9 @@
+ 
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/input.h>
+-#include <dt-bindings/input/input.h>
+ #include <dt-bindings/interrupt-controller/arm-gic.h>
+ #include <dt-bindings/interrupt-controller/irq.h>
+ #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+-#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+ #include "sm6225.dtsi"
+ #include "pm6125.dtsi"
+ #define PM7250B_SID 2
+@@ -54,19 +52,102 @@ framebuffer0: framebuffer@5c000000 {
+ 		};
+ 	};
+ 
+-	gpio-keys {
+-		compatible = "gpio-keys";
++	/*
++	 * Two AW87xxx class-D amps on the HPH outputs, two speakers each.  Stock pulses the
++	 * enable twice, which is what awinic,mode counts.
++	 */
++	speaker_amp_left: audio-amplifier-left {
++		compatible = "awinic,aw8738";
++		mode-gpios = <&tlmm 100 GPIO_ACTIVE_HIGH>;
++		awinic,mode = <2>;
++		sound-name-prefix = "SpkrLeft";
++		pinctrl-0 = <&spk_amp_left_default>;
++		pinctrl-names = "default";
++	};
+ 
+-		pinctrl-0 = <&vol_up_n>;
++	speaker_amp_right: audio-amplifier-right {
++		compatible = "awinic,aw8738";
++		mode-gpios = <&tlmm 98 GPIO_ACTIVE_HIGH>;
++		awinic,mode = <2>;
++		sound-name-prefix = "SpkrRight";
++		pinctrl-0 = <&spk_amp_right_default>;
+ 		pinctrl-names = "default";
++	};
+ 
+-		key-volume-up {
+-			label = "Volume Up";
+-			gpios = <&pm6125_gpios 5 GPIO_ACTIVE_LOW>;
+-			linux,code = <KEY_VOLUMEUP>;
+-			debounce-interval = <15>;
+-			linux,can-disable;
+-			wakeup-source;
++	wcd937x: audio-codec {
++		compatible = "qcom,wcd9370-codec";
++
++		pinctrl-0 = <&wcd_default>;
++		pinctrl-names = "default";
++
++		reset-gpios = <&tlmm 92 GPIO_ACTIVE_LOW>;
++
++		vdd-buck-supply = <&vreg_l14a>;
++		vdd-rxtx-supply = <&vreg_l9a>;
++		vdd-px-supply = <&vreg_l9a>;
++
++		qcom,micbias1-microvolt = <1800000>;
++		qcom,micbias2-microvolt = <1800000>;
++		qcom,micbias3-microvolt = <1800000>;
++
++		qcom,rx-device = <&wcd937x_rx>;
++		qcom,tx-device = <&wcd937x_tx>;
++
++		#sound-dai-cells = <1>;
++	};
++
++	sound {
++		compatible = "qcom,sm6225-sndcard";
++		model = "CHUWI-AuPad";
++
++		widgets = "Speaker", "Speakers";
++		pin-switches = "Speakers", "Headphone Jack", "Mic Jack";
++		aux-devs = <&speaker_amp_left>, <&speaker_amp_right>;
++
++		audio-routing = "IN1_HPHL", "HPHL_OUT",
++				"IN2_HPHR", "HPHR_OUT",
++				"SpkrLeft IN", "HPHL",
++				"SpkrRight IN", "HPHR",
++				"Speakers", "SpkrLeft OUT",
++				"Speakers", "SpkrRight OUT",
++				"Headphone Jack", "HPHL",
++				"Headphone Jack", "HPHR",
++				"AMIC1", "MIC BIAS1",
++				"AMIC2", "MIC BIAS2",
++				"AMIC2", "Mic Jack",
++				"TX SWR_INPUT4", "ADC1_OUTPUT",
++				"TX SWR_INPUT5", "ADC2_OUTPUT";
++
++		wcd-playback-dai-link {
++			link-name = "WCD Playback";
++
++			codec {
++				sound-dai = <&wcd937x 0>, <&swr0 0>, <&lpass_rx_macro 0>;
++			};
++
++			cpu {
++				sound-dai = <&q6apmbedai RX_CODEC_DMA_RX_0>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++
++		wcd-capture-dai-link {
++			link-name = "WCD Capture";
++
++			codec {
++				sound-dai = <&wcd937x 1>, <&swr1 0>, <&lpass_tx_macro 0>;
++			};
++
++			cpu {
++				sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
+ 		};
+ 	};
+ 
+@@ -307,6 +388,19 @@ fuel-gauge@62 {
+ 	};
+ };
+ 
++&lpass_rx_macro {
++	status = "okay";
++};
++
++&lpass_tx_macro {
++	status = "okay";
++};
++
++&lpass_va_macro {
++	qcom,dmic-sample-rate = <600000>;
++	status = "okay";
++};
++
+ &remoteproc_adsp {
+ 	firmware-name = "qcom/sm6225/aupad/adsp.mdt";
+ 	status = "okay";
+@@ -350,6 +444,32 @@ &ufs_mem_phy {
+ 	status = "okay";
+ };
+ 
++&swr0 {
++	status = "okay";
++
++	wcd937x_rx: codec@0,4 {
++		compatible = "sdw20217010a00";
++		reg = <0 4>;
++
++		/* HPH, CLSH, COMP, LO, DSD */
++		qcom,rx-port-mapping = <1 2 3 4 5>;
++		qcom,rx-channel-mapping = /bits/ 8 <1 2 1 1 2 1 1 2>;
++	};
++};
++
++&swr1 {
++	status = "okay";
++
++	wcd937x_tx: codec@0,3 {
++		compatible = "sdw20217010a00";
++		reg = <0 3>;
++
++		/* Stock runs ADC1/2 on master port 2, the one on the second data lane. */
++		qcom,tx-port-mapping = <2 2 3 3>;
++		qcom,tx-channel-mapping = /bits/ 8 <1 2 1 1 2 3 3 4 1 2 3 4>;
++	};
++};
++
+ /* TZ-owned; touching them stalls the bus. From the stock DT. */
+ &tlmm {
+ 	gpio-reserved-ranges = <0 4>, <14 4>;
+@@ -433,6 +553,29 @@ sw_ctrl_default: sw-ctrl-default-state {
+ 		function = "gpio";
+ 		bias-pull-down;
+ 	};
++
++	spk_amp_left_default: spk-amp-left-default-state {
++		pins = "gpio100";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++		output-low;
++	};
++
++	spk_amp_right_default: spk-amp-right-default-state {
++		pins = "gpio98";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++		output-low;
++	};
++
++	wcd_default: wcd-default-state {
++		pins = "gpio92";
++		function = "gpio";
++		drive-strength = <16>;
++		output-high;
++	};
+ };
+ 
+ /* PM6125 via RPM.  Minimums are what Android runs, maximums from the stock DT. */
+@@ -478,6 +621,11 @@ vreg_l12a: l12 {
+ 			regulator-max-microvolt = <1980000>;
+ 		};
+ 
++		vreg_l14a: l14 {
++			regulator-min-microvolt = <1700000>;
++			regulator-max-microvolt = <1900000>;
++		};
++
+ 		vreg_l15a: l15 {
+ 			regulator-min-microvolt = <3050000>;
+ 			regulator-max-microvolt = <3540000>;
+diff --git a/arch/arm64/boot/dts/qcom/sm6225.dtsi b/arch/arm64/boot/dts/qcom/sm6225.dtsi
+index 5859f2637..dd62b0dbf 100644
+--- a/arch/arm64/boot/dts/qcom/sm6225.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm6225.dtsi
+@@ -10,6 +10,9 @@
+  * SNPS femto USB HS PHY, and the names ABL looks up.
+  */
+ 
++#include <dt-bindings/firmware/qcom,scm.h>
++#include <dt-bindings/soc/qcom,gpr.h>
++#include <dt-bindings/sound/qcom,q6afe.h>
+ #include "sm6115.dtsi"
+ 
+ /*
+@@ -46,6 +49,17 @@ &pil_adsp_mem {
+ 	reg = <0x0 0x53800000 0x0 0x1e00000>;
+ };
+ 
++/* Heap of the static audio PD, handed to the ADSP when userspace creates it. */
++&reserved_memory {
++	adsp_rpc_remote_heap_mem: adsp-rpc-remote-heap {
++		compatible = "shared-dma-pool";
++		alloc-ranges = <0x0 0x0 0x0 0xffffffff>;
++		alignment = <0x0 0x400000>;
++		size = <0x0 0x800000>;
++		reusable;
++	};
++};
++
+ &pil_ipa_fw_mem {
+ 	reg = <0x0 0x55600000 0x0 0x10000>;
+ };
+@@ -80,6 +94,207 @@ &gcc {
+ 	compatible = "qcom,sm6225-gcc";
+ };
+ 
++/* The khaje ADSP firmware runs AudioReach (GPR), not the APR services of sm6115. */
++&remoteproc_adsp {
++	glink-edge {
++		/delete-node/ apr;
++
++		fastrpc {
++			memory-region = <&adsp_rpc_remote_heap_mem>;
++			qcom,vmids = <QCOM_SCM_VMID_LPASS QCOM_SCM_VMID_ADSP_HEAP>;
++		};
++
++		gpr {
++			compatible = "qcom,gpr";
++			qcom,glink-channels = "adsp_apps";
++			qcom,domain = <GPR_DOMAIN_ID_ADSP>;
++			qcom,intents = <512 20>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			q6apm: service@1 {
++				compatible = "qcom,q6apm";
++				reg = <GPR_APM_MODULE_IID>;
++				#sound-dai-cells = <0>;
++				qcom,protection-domain = "avs/audio",
++							 "msm/adsp/audio_pd";
++
++				q6apmbedai: bedais {
++					compatible = "qcom,q6apm-lpass-dais";
++					#sound-dai-cells = <1>;
++				};
++
++				q6apmdai: dais {
++					compatible = "qcom,q6apm-dais";
++					iommus = <&apps_smmu 0x1c1 0x0>;
++				};
++			};
++
++			q6prm: service@2 {
++				compatible = "qcom,q6prm";
++				reg = <GPR_PRM_MODULE_IID>;
++				qcom,protection-domain = "avs/audio",
++							 "msm/adsp/audio_pd";
++
++				q6prmcc: clock-controller {
++					compatible = "qcom,q6prm-lpass-clocks";
++					#clock-cells = <2>;
++				};
++			};
++		};
++	};
++};
++
++&lpass_tlmm {
++	/* Stock votes only this resource; the firmware fails the LPASS core vote. */
++	clocks = <&q6prmcc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
++	clock-names = "audio";
++
++	lpass_rx_swr_clk: rx-swr-clk-state {
++		pins = "gpio3";
++		function = "swr_rx_clk";
++		drive-strength = <10>;
++		slew-rate = <3>;
++		bias-disable;
++	};
++
++	lpass_rx_swr_data: rx-swr-data-state {
++		pins = "gpio4", "gpio5";
++		function = "swr_rx_data";
++		drive-strength = <10>;
++		slew-rate = <3>;
++		bias-bus-hold;
++	};
++
++	lpass_tx_swr_clk: tx-swr-clk-state {
++		pins = "gpio0";
++		function = "swr_tx_clk";
++		drive-strength = <10>;
++		slew-rate = <3>;
++		bias-disable;
++	};
++
++	lpass_tx_swr_data: tx-swr-data-state {
++		pins = "gpio1", "gpio2";
++		function = "swr_tx_data";
++		drive-strength = <10>;
++		slew-rate = <3>;
++		bias-bus-hold;
++	};
++};
++
++&soc {
++	lpass_rx_macro: codec@a600000 {
++		compatible = "qcom,sm6115-lpass-rx-macro";
++		reg = <0x0 0x0a600000 0x0 0x1000>;
++
++		pinctrl-0 = <&lpass_rx_swr_clk>, <&lpass_rx_swr_data>;
++		pinctrl-names = "default";
++
++		clocks = <&q6prmcc LPASS_CLK_ID_RX_CORE_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&q6prmcc LPASS_CLK_ID_RX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&q6prmcc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&lpass_va_macro>;
++		clock-names = "mclk", "npl", "dcodec", "fsgen";
++
++		#clock-cells = <0>;
++		#sound-dai-cells = <1>;
++
++		status = "disabled";
++	};
++
++	swr0: soundwire@a610000 {
++		compatible = "qcom,soundwire-v1.6.0";
++		reg = <0x0 0x0a610000 0x0 0x2000>;
++
++		interrupts = <GIC_SPI 297 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&lpass_rx_macro>;
++		clock-names = "iface";
++
++		qcom,din-ports = <0>;
++		qcom,dout-ports = <5>;
++
++		qcom,ports-word-length =	/bits/ 8 <0x01 0x07 0x04 0xff 0xff>;
++		qcom,ports-sinterval-low =	/bits/ 8 <0x03 0x3f 0x1f 0x03 0x03>;
++		qcom,ports-offset1 =		/bits/ 8 <0x00 0x00 0x0b 0x01 0x01>;
++		qcom,ports-offset2 =		/bits/ 8 <0x00 0x00 0x0b 0x00 0x00>;
++		qcom,ports-lane-control =	/bits/ 8 <0x01 0x00 0x00 0x00 0x00>;
++		qcom,ports-block-pack-mode =	/bits/ 8 <0xff 0x00 0x01 0xff 0xff>;
++		qcom,ports-hstart =		/bits/ 8 <0xff 0x03 0xff 0xff 0xff>;
++		qcom,ports-hstop =		/bits/ 8 <0xff 0x06 0xff 0xff 0xff>;
++		qcom,ports-block-group-count =	/bits/ 8 <0xff 0xff 0xff 0xff 0x00>;
++
++		#sound-dai-cells = <1>;
++		#address-cells = <2>;
++		#size-cells = <0>;
++
++		status = "disabled";
++	};
++
++	lpass_tx_macro: codec@a620000 {
++		compatible = "qcom,sm6115-lpass-tx-macro";
++		reg = <0x0 0x0a620000 0x0 0x1000>;
++
++		pinctrl-0 = <&lpass_tx_swr_clk>, <&lpass_tx_swr_data>;
++		pinctrl-names = "default";
++
++		clocks = <&q6prmcc LPASS_CLK_ID_TX_CORE_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&q6prmcc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&q6prmcc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&lpass_va_macro>;
++		clock-names = "mclk", "npl", "dcodec", "fsgen";
++
++		#clock-cells = <0>;
++		#sound-dai-cells = <1>;
++
++		status = "disabled";
++	};
++
++	lpass_va_macro: codec@a730000 {
++		compatible = "qcom,sm6115-lpass-va-macro";
++		reg = <0x0 0x0a730000 0x0 0x1000>;
++
++		clocks = <&q6prmcc LPASS_CLK_ID_VA_CORE_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&q6prmcc LPASS_CLK_ID_VA_CORE_2X_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
++			 <&q6prmcc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
++		clock-names = "mclk", "npl", "dcodec";
++
++		#clock-cells = <0>;
++		#sound-dai-cells = <1>;
++
++		status = "disabled";
++	};
++
++	/* WCD TX SoundWire hangs off the VA macro here; the TX macro has no master of its own. */
++	swr1: soundwire@a740000 {
++		compatible = "qcom,soundwire-v1.6.0";
++		reg = <0x0 0x0a740000 0x0 0x2000>;
++
++		interrupts = <GIC_SPI 296 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&lpass_va_macro>;
++		clock-names = "iface";
++
++		qcom,din-ports = <3>;
++		qcom,dout-ports = <0>;
++
++		qcom,ports-sinterval-low =	/bits/ 8 <0x01 0x03 0x03>;
++		qcom,ports-offset1 =		/bits/ 8 <0x01 0x00 0x02>;
++		qcom,ports-offset2 =		/bits/ 8 <0x00 0x00 0x00>;
++		qcom,ports-hstart =		/bits/ 8 <0xff 0xff 0xff>;
++		qcom,ports-hstop =		/bits/ 8 <0xff 0xff 0xff>;
++		qcom,ports-word-length =	/bits/ 8 <0xff 0x00 0xff>;
++		qcom,ports-block-pack-mode =	/bits/ 8 <0xff 0xff 0xff>;
++		qcom,ports-block-group-count =	/bits/ 8 <0xff 0xff 0xff>;
++		qcom,ports-lane-control =	/bits/ 8 <0x00 0x01 0x00>;
++
++		#sound-dai-cells = <1>;
++		#address-cells = <2>;
++		#size-cells = <0>;
++
++		status = "disabled";
++	};
++};
++
+ &gpucc {
+ 	compatible = "qcom,sm6225-gpucc";
+ };
+-- 
+2.43.0
+

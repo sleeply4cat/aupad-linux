@@ -40,7 +40,8 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 7. **GPU DONE 2026-10-30.** A610 v2: GLES 3.2 (freedreno), Vulkan (Turnip), Weston, up to 1260 MHz, see GPU.
 8. **Remoteprocs, Wi-Fi, Bluetooth, microSD DONE 2026-10-30.** See their sections.
 9. **Phosh, buttons, auto-rotate DONE 2026-10-31.** See Desktop. Installed by hand, not packaged yet.
-10. Then: boot hang, PM7250B charger, audio, suspend, USB3.
+10. **Speakers, internal mic DONE 2026-10-31.** See Audio. Installed by hand, not packaged yet.
+11. Then: boot hang, PM7250B charger, suspend, USB3.
 
 ## Next steps (in order)
 
@@ -48,7 +49,7 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 2. Device, kernel and firmware packages for pmaports. Firmware comes from your own device. U-Boot expects `/boot/boot.img` on `pmos`, so the
    installer's layout needs adapting.
 3. PM7250B charger driver: Phosh shows "discharging" even when charging, because `cw2015` has nothing to ask.
-4. Audio, suspend.
+4. Suspend. Audio leftovers: headphones and headset mic once the jack ribbon is back.
 5. Boot counter falling back to `/boot/boot.old`, so a hanging kernel on disk recovers without the UART.
 6. USB3 PHY, ICE, UFS interconnect votes, MX vote for the GPU.
 7. Clean up for upstreaming: real bindings, no stub in the chain.
@@ -150,7 +151,7 @@ Accelerometer QMI8658, 0x6B on an ADSP-side I2C bus, so there is no plain IIO de
 ## Desktop (2026-10-31)
 
 Phosh runs: `postmarketos-ui-phosh` on the existing rootfs, GPU-rendered, greeter on the panel. Packages were fetched on the host and installed
-from a local repo, which needs a `noarch -> aarch64` link; the USB proxy is too slow for it. Sound and suspend don't exist yet.
+from a local repo, which needs a `noarch -> aarch64` link; the USB proxy is too slow for it. Suspend doesn't exist yet.
 
 - Added by hand: `user` (uid 10000), `/etc/NetworkManager/conf.d/50-aupad-usb0.conf` (NetworkManager must not touch
   usb0), `/etc/elogind/sleep.conf.d/50-aupad-nosuspend.conf` (suspend is untested).
@@ -162,7 +163,24 @@ from a local repo, which needs a `noarch -> aarch64` link; the USB proxy is too 
   alarm, Smartcard, PrintNotifications, Wwan and UsbProtection autostarts hidden; tty1 getty off.
 - Run `rc-update -u` after adding services: a stale cache silently skipped dbus and bluetooth.
 - Cmdline drops `console=tty0 fbcon=...`: the panel shows no text, kernel log and emergency access are UART only.
-- nftables runs now that the kernel has it. `apk-polkit-server` still doesn't start, reason not checked.
+- nftables runs now that the kernel has it. `apk-polkit-server` doesn't start: its binary is missing. `localsearch-3` (pulled in by Files) needs its autostart hidden too.
+- On networks that block the package mirrors, run `tools/usbproxy.py` on the host and `apk` with `http_proxy` and `https_proxy` set to `http://172.16.42.2:8888`. It only serves `apk`, and there is no NAT over USB.
+
+## Audio (2026-10-31)
+
+Speakers work from apps through PulseAudio, and volume keys and slider work. The internal mic delivers signal, about -72 dBFS in a quiet room, but nobody has judged a recording by ear yet.
+
+- **Firmware:** the ADSP runs AudioReach (GPR), not sm6115's APR. No userspace helper is needed: Android's `audioadsprpcd` starts a static `audiopd`, but here macros, SoundWire and playback all work without it.
+- **Topology:** mainline needs `qcom/sm6225/CHUWI-AuPad-tplg.bin`. Build `build/pmos/audio/CHUWI-AuPad.m4` inside https://github.com/linux-msm/audioreach-topology: `m4 -I . CHUWI-AuPad.m4 > aupad.conf`, then `alsatplg -c aupad.conf -o CHUWI-AuPad-tplg.bin`. It warns about undefined `RX_CODEC_DMA_RX_0 Playback` and `TX_CODEC_DMA_TX_3 Capture` routes, and the result still loads. Install it under `/lib/firmware/`.
+- **UCM:** copy `build/pmos/audio/ucm2/` to `/usr/share/alsa/ucm2/`, and `audio-gain.start` to `/etc/local.d/`, then enable `local`. Everything here is installed by hand and belongs in the device package.
+- **Hardware:** RX, TX and VA macros (stock calls it Bolero 2.1, the VA macro reports v2.2), WCD9370 on SoundWire (`swr0` RX; `swr1` TX, under the VA macro), two AW87xxx amps on the HPH outputs (GPIO 100 and 98, `aw8738` driver, 2 pulses). Each amp drives two speakers: left is the top pair, right the bottom pair in portrait. So landscape gives real stereo, and a swap by orientation would only help there.
+- **Votes:** only `LPASS_HW_DCODEC_VOTE` works. With the MACRO vote the firmware answers error 1 and nothing probes.
+- **`RX HPH Mode` must be `CLS_H_LOHIFI`,** with `RX_HPH PWR Mode` `LOHIFI`. At its default the amps only buzz at the period rate, 50 Hz with 20 ms periods.
+- **HPH data stays on lane 1.** Lane 0 gives `SWR Port collision detected`.
+- **Left channel:** `wcd937x-sdw.c` wrote the binding's 12 `tx-channel-mapping` values into an 11-entry table, past its end, and HPH_L's `ch_mask` became 8. The loops are bounded now. Worth sending upstream.
+- **Internal mic:** stock's ADC1 path is master TX port 2, so `qcom,tx-port-mapping = <2 2 3 3>` and `SWR_MIC4`. The QCM6490 mapping gives digital silence. It goes through DEC0: with stock's DEC2 the DMA never delivers a sample. Only the first capture channel carries signal, so mono mixdown may lose about 6 dB.
+- **Volume is software only,** so the UCM profile names no mixer element. The driver's HPHL/HPHR dB scale is wrong and PulseAudio pushes the real gain to almost nothing, and the digital gain reaches +40 dB. Hardware stays fixed 14 dB under stock. Never test with a full-scale tone: at stock gain it's painfully loud.
+- **Jack:** the development tablet's socket ribbon is disconnected, and false plug events made PulseAudio switch the speakers off. So the installed profile has only Speakers and Mic1. `build/pmos/audio/HiFi-with-jack.conf` adds Headphones and the headset mic, but it can't work until that's reconnected, and its jack switching is untested.
 
 ## Boot hang, open (2026-10-31)
 

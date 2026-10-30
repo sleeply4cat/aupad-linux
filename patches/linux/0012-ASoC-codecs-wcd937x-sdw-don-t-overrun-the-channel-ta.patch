@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 01:59:27 +0300
+Subject: [PATCH 12/15] ASoC: codecs: wcd937x-sdw: don't overrun the channel
+ tables
+
+The binding requires 12 tx-channel-mapping values, counting dmic7, but
+the codec has no dmic7 and wcd937x_sdw_tx_ch_info has 11 entries. Probe
+writes all 12, past the end of the table and into whatever follows it.
+
+Here that was HPH_L's ch_mask in the RX table: it became 8, which the
+hardware drops, so only the right channel was enabled on the HPH port.
+
+Bound both loops by the table size.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ sound/soc/codecs/wcd937x-sdw.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/sound/soc/codecs/wcd937x-sdw.c b/sound/soc/codecs/wcd937x-sdw.c
+index 1ad75c226..568bac4b5 100644
+--- a/sound/soc/codecs/wcd937x-sdw.c
++++ b/sound/soc/codecs/wcd937x-sdw.c
+@@ -1024,6 +1024,10 @@ static int wcd9370_probe(struct sdw_slave *pdev,
+ 		pdev->prop.src_dpn_prop = wcd937x_dpn_prop;
+ 		wcd->ch_info = &wcd937x_sdw_tx_ch_info[0];
+ 
++		/* The binding counts dmic7, which this codec doesn't have. */
++		master_ch_mask_size = min_t(int, master_ch_mask_size,
++					    ARRAY_SIZE(wcd937x_sdw_tx_ch_info));
++
+ 		for (i = 0; i < master_ch_mask_size; i++)
+ 			wcd->ch_info[i].master_ch_mask = WCD937X_SWRM_CH_MASK(master_ch_mask[i]);
+ 
+@@ -1041,6 +1045,9 @@ static int wcd9370_probe(struct sdw_slave *pdev,
+ 		pdev->prop.sink_dpn_prop = wcd937x_dpn_prop;
+ 		wcd->ch_info = &wcd937x_sdw_rx_ch_info[0];
+ 
++		master_ch_mask_size = min_t(int, master_ch_mask_size,
++					    ARRAY_SIZE(wcd937x_sdw_rx_ch_info));
++
+ 		for (i = 0; i < master_ch_mask_size; i++)
+ 			wcd->ch_info[i].master_ch_mask = WCD937X_SWRM_CH_MASK(master_ch_mask[i]);
+ 	}
+-- 
+2.43.0
+

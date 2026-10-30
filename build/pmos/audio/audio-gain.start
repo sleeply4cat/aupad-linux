@@ -1,0 +1,6 @@
+#!/bin/sh
+# Keep the speakers off a safe ceiling before anything can play: the codec resets to 0 dB.
+amixer -q -c0 cset name='RX_RX0 Digital Volume' 70
+amixer -q -c0 cset name='RX_RX1 Digital Volume' 70
+amixer -q -c0 cset name='HPHL Volume' 20
+amixer -q -c0 cset name='HPHR Volume' 20

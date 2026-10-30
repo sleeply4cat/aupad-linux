@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 01:59:27 +0300
+Subject: [PATCH 14/15] ASoC: qcom: sc8280xp: add SM6225
+
+SM6225's ADSP firmware runs AudioReach, so it belongs in this driver
+rather than sm8250.c, which sm6115-based boards use.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ sound/soc/qcom/sc8280xp.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/sound/soc/qcom/sc8280xp.c b/sound/soc/qcom/sc8280xp.c
+index 4d48e1012..c8bc39eaa 100644
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -505,6 +505,13 @@ static const struct qcom_snd_soc_common sc8280xp_priv_data = {
+ 	.wcd_jack = true,
+ };
+ 
++static const struct qcom_snd_soc_common sm6225_priv_data = {
++	.driver_name = "sm6225",
++	.dapm_widgets = sc8280xp_dapm_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(sc8280xp_dapm_widgets),
++	.wcd_jack = true,
++};
++
+ static const struct qcom_snd_soc_common sm8450_priv_data = {
+ 	.driver_name = "sm8450",
+ 	.dapm_widgets = sc8280xp_dapm_widgets,
+@@ -571,6 +578,7 @@ static const struct of_device_id snd_sc8280xp_dt_match[] = {
+ 	{ .compatible = "qcom,qcs9075-sndcard", .data = &qcs9100_priv_data },
+ 	{ .compatible = "qcom,qcs9100-sndcard", .data = &qcs9100_priv_data },
+ 	{ .compatible = "qcom,sc8280xp-sndcard", .data = &sc8280xp_priv_data },
++	{ .compatible = "qcom,sm6225-sndcard", .data = &sm6225_priv_data },
+ 	{ .compatible = "qcom,sm8450-sndcard", .data = &sm8450_priv_data },
+ 	{ .compatible = "qcom,sm8475-sndcard", .data = &sm8475_priv_data },
+ 	{ .compatible = "qcom,sm8550-sndcard", .data = &sm8550_priv_data },
+-- 
+2.43.0
+

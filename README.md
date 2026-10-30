@@ -6,25 +6,29 @@ Mainline Linux 7.3-rc3 and postmarketOS on the CHUWI AuPad tablet: Qualcomm SM62
 **Status: bring-up.** It's a working developer port, not an installable release. It boots from UFS with no host
 attached, but setting it up rewrites partitions, and getting it wrong can leave you needing EDL. Keep a full backup.
 
-| Area | State |
-|---|---|
-| CPU, cpufreq, thermal, watchdog | Works. PMU node removed: it hangs the SoC, cause unknown. **Open bug: some boots freeze the whole SoC around 10 s** |
-| UFS | Works, HS-G3 x2 |
-| USB | Gadget works, HS only. No USB3 PHY yet |
-| Display | Works: DPU, 7 nm DSI, FT8201P panel, 60 Hz |
-| Backlight | Works, PM6125 PWM |
-| Touch | Works, up to 10 points. Far-apart fingers glitch, also seen on stock |
-| Buttons | Power and volume work. Power-off works; with USB attached the tablet starts again |
-| GPU | Adreno 610: OpenGL ES 3.2 and Weston work, Vulkan driver loads, stress-tested at up to 1260 MHz |
-| Desktop | Phosh runs, with GPU rendering and auto-rotate. Installed by hand, not packaged |
-| Battery | Gauge readout only, and it always shows "discharging". Charging runs on bootloader settings, no charger driver |
-| ADSP, CDSP, modem | Boot from stock firmware. Modem data and calls not tested |
-| Wi-Fi | Works, 2.4 and 5 GHz. MAC address is generated |
-| Bluetooth | Scan works, pairing untested. Address is generated |
-| microSD | Reads work at SDR104. Writing and card removal untested |
-| Accelerometer | Works through the ADSP. Other sensors not exposed |
-| Audio, camera | Not started |
-| Suspend | Not tested, disabled in the desktop setup |
+| Area | Status | Notes |
+|---|---|---|
+| CPU, cpufreq, thermal | Works | PMU node removed: it hangs the SoC |
+| UFS | Works | HS-G3 x2 |
+| USB | Partial | Gadget only, HS. No USB3 PHY |
+| Display, backlight | Works | 60 Hz |
+| Touch | Works | Up to 10 points. Far-apart fingers glitch, also on stock |
+| Buttons | Works | Power-off restarts if USB is attached |
+| GPU | Works | GLES 3.2 and Weston. Vulkan loads |
+| Desktop | Works | Phosh with auto-rotate, installed by hand |
+| Wi-Fi | Works | 2.4 and 5 GHz, generated MAC |
+| Bluetooth | Partial | Scan works, pairing untested |
+| microSD | Partial | Reads work, writes and removal untested |
+| Accelerometer | Works | Through the ADSP. Other sensors not exposed |
+| Speakers | Works | Software volume, 14 dB under stock level |
+| Internal mic | Partial | Signal measured, not yet checked by ear |
+| Headphones, headset mic | Not tested | Jack ribbon disconnected on the dev tablet |
+| ADSP, CDSP, modem | Partial | Firmware boots. Modem data and calls untested |
+| Battery | Partial | Gauge only, always "discharging". No charger driver |
+| Boot | Broken | Some boots freeze the whole SoC around 10 s |
+| Suspend | Not tested | Disabled in the desktop setup |
+| Camera | Not started | |
+| USB3, packaging for pmaports | Not started | |
 
 Known gaps: a boot can freeze the whole SoC, and the kernel on disk then needs a host to recover, see "Boot hang" in the docs. The GPU doesn't vote the MX rail, so 1260 MHz is tested rather than guaranteed. The LP6280S display bias chip
 has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for how everything works and what went wrong.
@@ -33,17 +37,17 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 
 | Path | Contents |
 |---|---|
-| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, device tree |
+| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, device tree |
 | `patches/u-boot/` | U-Boot series: UFS on SM6225, boot environment |
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
-| `build/` | Boot image, rootfs and test-loop scripts, initramfs |
+| `build/` | Boot image, rootfs and test-loop scripts, initramfs, audio topology source and UCM profile |
 | `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy, UART recorder, ramdump capture |
 | `docs/PORT.md` | Engineering notes |
 
 No firmware, dumps or stock binaries are included. You need these from your own device or public sources:
 GPU firmware `a630_sqe.fw` and `a610_zap.*` from `/vendor/firmware` into `firmware/`, and a static aarch64 busybox as
-`build/initramfs/busybox`. Modem, DSP, Wi-Fi, Bluetooth and sensor files are listed in [docs/PORT.md](docs/PORT.md).
+`build/initramfs/busybox`. The audio topology is built from source. Modem, DSP, Wi-Fi, Bluetooth and sensor files are listed in [docs/PORT.md](docs/PORT.md).
 
 ## Building
 
