@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Fri, 30 Oct 2026 22:04:34 +0300
-Subject: [PATCH 1/9] clk: qcom: alpha-pll: fix Zonda rates with a negative
+Subject: [PATCH 01/11] clk: qcom: alpha-pll: fix Zonda rates with a negative
  alpha
 
 zonda_pll_adjust_l_val() computes the quotient, then stores the rate in L,
@@ -63,3 +63,6 @@ index f8313f9d0..4adb1344d 100644
  	.determine_rate = clk_alpha_pll_determine_rate,
  	.set_rate = clk_zonda_pll_set_rate,
  };
+-- 
+2.43.0
+

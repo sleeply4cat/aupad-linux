@@ -38,16 +38,21 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 6. **Battery readout DONE 2026-10-30.** CW2015 on i2c1 (`0-0062`), PM7250B on SPMI SID 2/3 with ADC and temp
    alarm. No charger driver: mainline has none for PM7250B here, the PMIC runs on bootloader settings (see Power).
 7. **GPU DONE 2026-10-30.** A610 v2: GLES 3.2 (freedreno), Vulkan (Turnip), Weston, up to 1260 MHz, see GPU.
-8. Then: Wi-Fi/BT (WCN), audio, remoteprocs, PM7250B charger, USB3.
+8. **Remoteprocs, Wi-Fi, Bluetooth, microSD DONE 2026-10-30.** See their sections.
+9. **Phosh, buttons, auto-rotate DONE 2026-10-31.** See Desktop. Installed by hand, not packaged yet.
+10. Then: boot hang, PM7250B charger, audio, suspend, USB3.
 
 ## Next steps (in order)
 
-1. Remoteprocs and Wi-Fi/BT.
-2. Device, kernel and firmware packages for pmaports.
-3. Boot counter falling back to `/boot/boot.old`, so a hanging kernel on disk recovers without the UART.
-4. MX voting for the GPU, charger driver, USB3 PHY, ICE, UFS interconnect votes.
-5. Clean up for upstreaming: real bindings, no stub in the chain.
-6. Open: PMU root cause (see Stability gotchas); kexec early hang (replaced by U-Boot).
+1. Boot hang: measure, isolate, fix. See that section.
+2. Device, kernel and firmware packages for pmaports. Firmware comes from your own device. U-Boot expects `/boot/boot.img` on `pmos`, so the
+   installer's layout needs adapting.
+3. PM7250B charger driver: Phosh shows "discharging" even when charging, because `cw2015` has nothing to ask.
+4. Audio, suspend.
+5. Boot counter falling back to `/boot/boot.old`, so a hanging kernel on disk recovers without the UART.
+6. USB3 PHY, ICE, UFS interconnect votes, MX vote for the GPU.
+7. Clean up for upstreaming: real bindings, no stub in the chain.
+8. Open: PMU root cause (see Stability gotchas); kexec early hang (replaced by U-Boot).
 
 To go back to Android: run `build/boot-bcbclr.img`, then restore your own backup of recovery_b.
 
@@ -81,7 +86,100 @@ shells. tty1 asks for login and root has no password, which is moot without a ke
   from the same build. They aren't in `rootfs.img`, so rerun it after reflashing the rootfs.
 - `make Image modules dtb` stops at a DTB error and silently leaves modules unbuilt; check the output.
 
-Wi-Fi: not started. No WCN or remoteproc nodes in the DT, drivers are modules, none on the rootfs. Depends on remoteprocs (modem PIL) and QRTR.
+
+## Remoteprocs (2026-10-30)
+
+ADSP, CDSP and modem boot through PAS from the stock firmware. The sm6115 nodes fit as they are.
+
+- Rootfs setup is manual, not in `mkrootfs.sh`. Packages: `rmtfs pd-mapper tqftpserv qrtr` plus `-openrc`. Services `pd-mapper
+  tqftpserv rmtfs` in `default`, and `rc_need="pd-mapper tqftpserv"` in `/etc/conf.d/rmtfs`, because `-s` makes rmtfs start the modem.
+- Firmware in `/lib/firmware/qcom/sm6225/aupad/`: stock `modem.* adsp.* cdsp.* *.jsn modem_pr wlanmdsp.mbn qdsp6m.qdb`.
+- EFS: rmtfs runs from files in `/var/lib/rmtfs` (`modem_fs1`, `modem_fs2`, `modem_fsg`, `modem_fsc`, copies of the stock partitions), so the
+  real `modemst1/2` are never written. The path is `<dir>/modem_fs1`, not `<dir>/boot/...`. A missing file crashes the modem with
+  `rmts_get_buffer api failed`.
+- **QRTR race, fixed in `net/qrtr/ns.c`, upstream candidate.** The modem's HELLO can reach the name service before our own HELLO went out.
+  Sending then gives -EAGAIN (`hello_sent` false), `announce_servers()` gave up, the modem never heard about rmtfs and sat at 2 services.
+  The only sign was `failed to announce new service`. It now retries for up to 1 s.
+- Modem crash recovery is not clean: after `stop`/`start` or a crash, it may need a reboot.
+- Kernel PD mapper prints `PDM: no support for the platform`; the userspace `pd-mapper` does the job.
+- Not done: fastrpc CMA, IPA (modem data), SIM or LTE. ModemManager runs but nothing was tested.
+
+## Wi-Fi (2026-10-30)
+
+WCN3950 on the modem (`qcom,wcn3990-wifi`, ath10k_snoc, chip_id 0x120, WLAN.HL.3.2.4). **Works:** connected from Phosh's settings on 5 GHz at
+-52 dBm, with traffic. Scan finds both bands. Throughput and long runs not measured.
+
+- `/lib/firmware/ath10k/WCN3990/hw1.0/aupad/`: `firmware-5.bin` from linux-firmware `qcm2290/` (feature flags only), `board.bin` = stock
+  `bdwlan.bin`, the one Android loads. DT has `firmware-name = "aupad"`. A real `board-2.bin` is still to do.
+- Don't rmmod/modprobe ath10k_snoc to retry: `host capability request rejected: 90`. Reboot instead.
+- The chip returns no MAC, and Android randomises too. `/etc/udev/rules.d/70-wlan-mac.rules` pins a generated locally administered one.
+- NetworkManager owns Wi-Fi under Phosh, and `usb0` is unmanaged. `build/pmos/wifi-join` is only for a console-only rootfs.
+
+## Bluetooth (2026-10-30)
+
+Controller on, scan finds devices. Pairing and audio untested.
+
+- The chip is **WCN3950**, not RB2's WCN3988: SOC 0x40070120, ROM 0x102, on uart3 (gpio 8-11), PMU `qcom,wcn3950-pmu`. WCN3988 settings ask for
+  a nonexistent `apbtfw0a.tlv`. Firmware `qca/cmbtfw12.tlv` + `cmnv12.bin` from stock `vendor/bt_firmware`.
+- Packages `bluez bluez-btmgmt dbus`. No BD address in the chip and none found in stock data, so hci0 stays unconfigured until
+  `/etc/local.d/bt-addr.start` sets the generated `/etc/bluetooth/bdaddr` with `btmgmt public-addr`. Needs the `local` service.
+
+## microSD (2026-10-30)
+
+`sdhc_2`, card detect GPIO 88, L22 and L5, L7 always on as pad bias (no mainline consumer). SDR104, 73 MB/s read. Writing untested.
+Card-removal polarity not verified: stock says ACTIVE_HIGH, and with the pull-up an empty slot may also read high.
+
+## Buttons (2026-10-31)
+
+`pon_pwrkey`, `pon_resin` (volume down), `gpio-keys` on PM6125 GPIO 5 (volume up). All work, and power blanks and wakes the panel.
+Power-off works (`reboot: Power down`); with USB attached the PMIC starts the tablet again about 3 s later.
+
+## Sensors and rotation (2026-10-31)
+
+Accelerometer QMI8658, 0x6B on an ADSP-side I2C bus, so there is no plain IIO device. Auto-rotate works.
+
+- `hexagonrpcd-adsp-sensorspd` plus Alpine's iio-sensor-proxy, which has SSC support. `/etc/conf.d/hexagonrpcd-adsp-sensorspd` sets
+  `hexagonrpcd_fw_dir` and `rc_need="rmtfs"`.
+- Served tree `/usr/share/qcom/sm6225/chuwi/aupad/`, owned by `fastrpc`: `dsp/{adsp,cdsp}` (vendor/dsp), `sensors/config`
+  (vendor/etc/sensors/config), `sensors/sns_reg.conf` (vendor/etc/sensors/sns_reg_config), `sensors/registry` (`/sensors/registry/registry` in
+  `persist`). Don't mirror Android's paths: a wrong layout crashes the ADSP in a loop with `sns_registry_sensor.c:154 SNS_RC_SUCCESS == rc`.
+- `/etc/udev/rules.d/61-aupad-accel.rules` sets `ACCEL_MOUNT_MATRIX="-1, 0, 0; 0, -1, 0; 0, 0, 1"` on `fastrpc-adsp`, the node the SSC driver
+  reads it from. Without it every orientation is 180 degrees off.
+- Stock also lists stk3x1x light, ist8306 compass and bu52053nvx hall; iio-sensor-proxy shows none of them. Gyro not used.
+
+## Desktop (2026-10-31)
+
+Phosh runs: `postmarketos-ui-phosh` on the existing rootfs, GPU-rendered, greeter on the panel. Packages were fetched on the host and installed
+from a local repo, which needs a `noarch -> aarch64` link; the USB proxy is too slow for it. Sound and suspend don't exist yet.
+
+- Added by hand: `user` (uid 10000), `/etc/NetworkManager/conf.d/50-aupad-usb0.conf` (NetworkManager must not touch
+  usb0), `/etc/elogind/sleep.conf.d/50-aupad-nosuspend.conf` (suspend is untested).
+- **Rotation needs three settings together.** phoc ignores the panel's `rotation=<180>`, so `/etc/phosh/phoc.ini` has `[output:DSI-1] rotate = 180`.
+  Touch needs `/etc/udev/rules.d/60-aupad-touch.rules`, `LIBINPUT_CALIBRATION_MATRIX=-1 0 1 0 -1 1`. The sensor needs the mount matrix above.
+  Weston behaves differently and would need the touch rule removed. All three belong in the device package.
+- Boot and session fixes: `swapfile` and `/etc/init.d/swap` collide with zram's
+  virtual `swap` (services wait about 50 s, rc-update prints `swap is the name of a real and virtual service`); `kill-plymouth` removed; Evolution
+  alarm, Smartcard, PrintNotifications, Wwan and UsbProtection autostarts hidden; tty1 getty off.
+- Run `rc-update -u` after adding services: a stale cache silently skipped dbus and bluetooth.
+- Cmdline drops `console=tty0 fbcon=...`: the panel shows no text, kernel log and emergency access are UART only.
+- nftables runs now that the kernel has it. `apk-polkit-server` still doesn't start, reason not checked.
+
+## Boot hang, open (2026-10-31)
+
+**The worst open bug.** On some boots, 2 in about 30 when first measured, the whole SoC freezes 9-10 s in, during module loading. A disk kernel with no
+host attached is then stuck in ramdump, so keep the tablet connected.
+
+- No oops, no RCU stall, no watchdog message. About 6 s later a reset into ramdump. Reset status is 3 in both dumps.
+- One capture ends at `Bluetooth: SCO socket layer initialized`, right before the DSP starts. Another ends at
+  `Booting fw image qcom/sm6225/aupad/cdsp.mdt`. So both are around the concurrent PAS starts in TrustZone.
+- Same signature as the `/pmu` hang in Stability gotchas, whose cause was never found.
+- The earlier ramdumps "on reboot" are probably this hang on the next boot: the first was seen without UART, so that's an inference.
+- Ruled out by reading only: `qcom_rng`, which has its own clock and is used the same way on stock.
+- Not reproduced by replacing modules and rebooting (4 of 4 fine), or by plain reboots (4 of 4 fine, later 2 of 2).
+- Capturing one: `tools/uartd.py` keeps the UART recorded and runs `build/rdcap.sh` on any ramdump. It reads Sahara memory-debug mode (05c6:900e) over raw USB. A USB port reset gives a fresh HELLO, the zero-length packet after each
+  read of a 512-byte multiple must be consumed, and the reset reply must be read or the device doesn't go on. The kernel is at 0x80600000 via
+  U-Boot. Search RAM for the log text rather than trusting `__log_buf` from `System.map`.
+- Next: measure the rate over about 20 reboots, repeat with DSPs started one at a time, pull CPU contexts from the dumps.
 
 ## Standalone boot (2026-10-30)
 

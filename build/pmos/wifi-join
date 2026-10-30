@@ -1,0 +1,26 @@
+#!/bin/sh
+# Join a Wi-Fi network: asks for the SSID and passphrase, keeps them in /etc/wpa_supplicant.
+# usage: ssh -t root@172.16.42.1 wifi-join     without a terminal: reconnects to the saved network
+C=/etc/wpa_supplicant/wpa_supplicant.conf
+set -e
+if [ -t 0 ]; then
+    printf 'SSID: '; read -r ssid
+    stty -echo; printf 'Passphrase: '; read -r pass; stty echo; echo
+    umask 077
+    mkdir -p "${C%/*}"
+    wpa_passphrase "$ssid" "$pass" | grep -v '#psk=' > "$C"
+fi
+[ -s "$C" ] || { echo "no saved network, run wifi-join in a terminal"; exit 1; }
+killall wpa_supplicant udhcpc 2>/dev/null || true
+ip link set wlan0 up
+wpa_supplicant -B -i wlan0 -c "$C" -D nl80211
+for i in $(seq 20); do
+    iw dev wlan0 link | grep -q '^Connected' && break
+    sleep 1
+done
+iw dev wlan0 link | grep -q '^Connected' || { echo "not connected, see dmesg"; exit 1; }
+# only the default route moves to Wi-Fi, usb0 stays as it is
+udhcpc -i wlan0 -n -q -t 10
+iw dev wlan0 link | grep -E 'freq|signal|bitrate'
+ip -4 addr show wlan0 | grep inet
+ping -c 3 -W 3 -I wlan0 1.1.1.1 | tail -2

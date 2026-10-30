@@ -8,18 +8,25 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 
 | Area | State |
 |---|---|
-| CPU, cpufreq, thermal, watchdog | Works. PMU node removed: it hangs the SoC, cause unknown |
+| CPU, cpufreq, thermal, watchdog | Works. PMU node removed: it hangs the SoC, cause unknown. **Open bug: some boots freeze the whole SoC around 10 s** |
 | UFS | Works, HS-G3 x2 |
 | USB | Gadget works, HS only. No USB3 PHY yet |
 | Display | Works: DPU, 7 nm DSI, FT8201P panel, 60 Hz |
 | Backlight | Works, PM6125 PWM |
 | Touch | Works, up to 10 points. Far-apart fingers glitch, also seen on stock |
+| Buttons | Power and volume work. Power-off works; with USB attached the tablet starts again |
 | GPU | Adreno 610: OpenGL ES 3.2 and Weston work, Vulkan driver loads, stress-tested at up to 1260 MHz |
-| Battery | Gauge readout only. Charging runs on bootloader settings, no charger driver |
-| Wi-Fi, BT, audio, modem, camera, sensors | Not started |
-| Suspend | Not tested |
+| Desktop | Phosh runs, with GPU rendering and auto-rotate. Installed by hand, not packaged |
+| Battery | Gauge readout only, and it always shows "discharging". Charging runs on bootloader settings, no charger driver |
+| ADSP, CDSP, modem | Boot from stock firmware. Modem data and calls not tested |
+| Wi-Fi | Works, 2.4 and 5 GHz. MAC address is generated |
+| Bluetooth | Scan works, pairing untested. Address is generated |
+| microSD | Reads work at SDR104. Writing and card removal untested |
+| Accelerometer | Works through the ADSP. Other sensors not exposed |
+| Audio, camera | Not started |
+| Suspend | Not tested, disabled in the desktop setup |
 
-Known gaps: the GPU doesn't vote the MX rail, so 1260 MHz is tested rather than guaranteed. The LP6280S display bias chip
+Known gaps: a boot can freeze the whole SoC, and the kernel on disk then needs a host to recover, see "Boot hang" in the docs. The GPU doesn't vote the MX rail, so 1260 MHz is tested rather than guaranteed. The LP6280S display bias chip
 has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for how everything works and what went wrong.
 
 ## What's here
@@ -31,12 +38,12 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
 | `build/` | Boot image, rootfs and test-loop scripts, initramfs |
-| `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy |
+| `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy, UART recorder, ramdump capture |
 | `docs/PORT.md` | Engineering notes |
 
 No firmware, dumps or stock binaries are included. You need these from your own device or public sources:
 GPU firmware `a630_sqe.fw` and `a610_zap.*` from `/vendor/firmware` into `firmware/`, and a static aarch64 busybox as
-`build/initramfs/busybox`.
+`build/initramfs/busybox`. Modem, DSP, Wi-Fi, Bluetooth and sensor files are listed in [docs/PORT.md](docs/PORT.md).
 
 ## Building
 
@@ -45,7 +52,7 @@ https://gitlab.com/mt6735-mainline/linux.git, a 7.3-rc3 tree. They only touch Qu
 7.3-rc3 is untested and may need small fixups.
 
 ```sh
-python3 -m venv venv && venv/bin/pip install pyserial
+python3 -m venv venv && venv/bin/pip install pyserial pyusb
 
 git clone https://gitlab.com/mt6735-mainline/linux.git && cd linux
 git checkout -b aupad a62a3e8f9 && git am ../patches/linux/*.patch
@@ -58,7 +65,7 @@ aarch64-linux-gnu-gcc -O2 -static -o build/tests/rx build/tests/rx.c
 aarch64-linux-gnu-gcc -O2 -static -o build/tests/rb build/tests/rb.c
 cat ~/.ssh/id_ed25519.pub > build/tests/authorized_keys
 
-CMDLINE="earlycon=qcom_geni,0x4a90000 console=tty0 console=ttyMSM0,115200n8 fbcon=font:TER16x32 ignore_loglevel \
+CMDLINE="earlycon=qcom_geni,0x4a90000 console=ttyMSM0,115200n8 ignore_loglevel \
 clk_ignore_unused pd_ignore_unused rdinit=/init panic=10 root=pmos" build/mkboot.sh build/boot-pmos.img
 ```
 

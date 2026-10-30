@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 00:44:24 +0300
+Subject: [PATCH 10/11] net: qrtr: ns: retry announcing services to a new node
+
+qrtr_node_enqueue() refuses everything but HELLO until our own HELLO has
+gone out, and that one is sent from delayed work. If the remote's HELLO
+reaches the name service first, announcing the local services returns
+-EAGAIN and announce_servers() gives up for good.
+
+On SM6225 this leaves the modem without rmtfs and tftp: it stays up with two
+services and Wi-Fi never starts, and the only sign is "failed to announce
+new service". Retry for up to a second, and print the error if that fails.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
+---
+ net/qrtr/ns.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/net/qrtr/ns.c b/net/qrtr/ns.c
+index bcb090ee7..151de74c2 100644
+--- a/net/qrtr/ns.c
++++ b/net/qrtr/ns.c
+@@ -5,6 +5,7 @@
+  * Copyright (c) 2020, Linaro Ltd.
+  */
+ 
++#include <linux/delay.h>
+ #include <linux/module.h>
+ #include <linux/qrtr.h>
+ #include <linux/workqueue.h>
+@@ -218,6 +219,7 @@ static int announce_servers(struct sockaddr_qrtr *sq)
+ 	struct qrtr_server *srv;
+ 	struct qrtr_node *node;
+ 	unsigned long index;
++	int retries = 50;
+ 	int ret;
+ 
+ 	node = node_get(qrtr_ns.local_node);
+@@ -226,12 +228,20 @@ static int announce_servers(struct sockaddr_qrtr *sq)
+ 
+ 	/* Announce the list of servers registered in this node */
+ 	xa_for_each(&node->servers, index, srv) {
+-		ret = service_announce_new(sq, srv);
++		do {
++			ret = service_announce_new(sq, srv);
++			/* The remote said hello first, ours is still pending */
++			if (ret == -EAGAIN && retries--)
++				msleep(20);
++			else
++				break;
++		} while (1);
++
+ 		if (ret < 0) {
+ 			if (ret == -ENODEV)
+ 				continue;
+ 
+-			pr_err("failed to announce new service\n");
++			pr_err("failed to announce new service: %d\n", ret);
+ 			return ret;
+ 		}
+ 	}
+-- 
+2.43.0
+

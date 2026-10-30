@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Fri, 30 Oct 2026 22:04:35 +0300
-Subject: [PATCH 4/9] phy: qcom-qmp-ufs: add SM6225 support
+Subject: [PATCH 04/11] phy: qcom-qmp-ufs: add SM6225 support
 
 Tables from the stock khaje UFS PHY module. HS-G3 x2 rate B.
 
@@ -127,3 +127,6 @@ index d4aca22c1..dd3e6189f 100644
  	}, {
  		.compatible = "qcom,sm6350-qmp-ufs-phy",
  		.data = &sdm845_ufsphy_cfg,
+-- 
+2.43.0
+

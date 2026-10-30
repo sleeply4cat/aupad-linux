@@ -1,7 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Fri, 30 Oct 2026 22:04:34 +0300
-Subject: [PATCH 2/9] dt-bindings: clock: add SM6225 IDs to the SM6115 headers
+Subject: [PATCH 02/11] dt-bindings: clock: add SM6225 IDs to the SM6115
+ headers
 
 SM6225 (khaje) is a bengal derivative and shares sm6115.dtsi, so extend the
 SM6115 GCC, dispcc and gpucc headers instead of duplicating them. Stopgap:
@@ -68,3 +69,6 @@ index 945f21a7d..3118578ee 100644
  
  /* Resets */
  #define GPU_GX_BCR			0
+-- 
+2.43.0
+

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 mkdir -p logs
 IMG=$1; MAX=${2:-120}
 E=${EDL_PYTHON:-python3}
-UART=$(ls /dev/serial/by-id/usb-Nordic_nanobridge_*-if00)
+UART=$(ls /tmp/aupad-uart 2>/dev/null || ls /dev/serial/by-id/usb-Nordic_nanobridge_*-if00)
 fb() { timeout 1 fastboot devices 2>/dev/null | grep -q .; }
 T0=$(date +%s)
 # U-Boot autoboots pmOS after 1 s unless stopped
@@ -14,7 +14,7 @@ fb || { venv/bin/python tools/ubstop.py 60 & STOP=$!; }
 for _ in $(seq 60); do
     fb && break
     case "$(lsusb | grep -oE '05c6:900e|18d1:d001|18d1:4e[0-9a-f]{2}|05c6:f000' | head -1)" in
-        05c6:900e) $E tools/sahara_reset.py >/dev/null 2>&1; sleep 3 ;;
+        05c6:900e) build/rdcap.sh | tail -1; sleep 3 ;;
         18d1:d001) printf 'rb recovery\r' > $UART; sleep 3 ;;
         18d1:4ee0) ;;
         18d1:4e*)  adb reboot; sleep 3 ;;
