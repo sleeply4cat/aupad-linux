@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 14:57:23 +0300
+Subject: [PATCH 19/23] clk: qcom: alpha-pll: honour FSM legacy mode on Trion
+ and Lucid PLLs
+
+clk_trion_pll_configure() ignores SUPPORTS_FSM_LEGACY_MODE, which the
+Alpha configure path honours and downstream sets here too. Without the
+bit gpll10 on SM6225 never locks, so nothing clocked from it can start.
+SM6375 carries the same flag and also changes behaviour here.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ekTBjucpaN4ypc4DaZ
+---
+ drivers/clk/qcom/clk-alpha-pll.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+index 4adb1344d..b1ba0fb25 100644
+--- a/drivers/clk/qcom/clk-alpha-pll.c
++++ b/drivers/clk/qcom/clk-alpha-pll.c
+@@ -1749,6 +1749,10 @@ void clk_trion_pll_configure(struct clk_alpha_pll *pll, struct regmap *regmap,
+ 	regmap_update_bits(regmap, PLL_MODE(pll), PLL_UPDATE_BYPASS,
+ 			   PLL_UPDATE_BYPASS);
+ 
++	if (pll->flags & SUPPORTS_FSM_LEGACY_MODE)
++		regmap_update_bits(regmap, PLL_MODE(pll), PLL_FSM_LEGACY_MODE,
++				   PLL_FSM_LEGACY_MODE);
++
+ 	/* Disable PLL output */
+ 	regmap_update_bits(regmap, PLL_MODE(pll),  PLL_OUTCTRL, 0);
+ 
+-- 
+2.43.0
+

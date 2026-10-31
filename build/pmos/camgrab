@@ -1,0 +1,21 @@
+#!/bin/sh
+# camgrab.sh W H [count]: raw Bayer through csiphy0 -> csid0 -> vfe0 rdi0
+W=${1:-2104}; H=${2:-1560}; N=${3:-5}
+S=$(ls /sys/bus/i2c/drivers/ov13b10 | grep -- -0036)
+SN="ov13b10 $S"
+V=$(media-ctl -d /dev/media0 -e msm_vfe0_video0)
+M="media-ctl -d /dev/media0"
+$M -r
+$M -l '"msm_csiphy0":1->"msm_csid0":0[1]'
+$M -l '"msm_csid0":1->"msm_vfe0_rdi0":0[1]'
+C=$($M --get-v4l2 "\"$SN\":0" | sed -n 's/.*fmt:\([A-Z0-9a-z_]*\).*/\1/p')
+echo sensor code $C
+$M -V "\"$SN\":0[fmt:$C/${W}x$H field:none]"
+$M -V "\"msm_csiphy0\":0[fmt:$C/${W}x$H field:none]"
+$M -V "\"msm_csid0\":0[fmt:$C/${W}x$H field:none]"
+$M -V "\"msm_vfe0_rdi0\":0[fmt:$C/${W}x$H field:none]"
+case $C in SGRBG10*) P=pgAA;; SBGGR10*) P=pBAA;; SGBRG10*) P=pGAA;; SRGGB10*) P=pRAA;; esac
+v4l2-ctl -d $V --set-fmt-video=width=$W,height=$H,pixelformat=$P
+rm -f /tmp/f.raw
+timeout 10 v4l2-ctl -d $V --stream-mmap --stream-count=$N --stream-to=/tmp/f.raw --stream-poll --verbose 2>&1 | tail -6
+echo rc=$?; ls -l /tmp/f.raw

@@ -1,0 +1,223 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 14:57:23 +0300
+Subject: [PATCH 22/23] arm64: dts: qcom: sm6225: add CCI and CAMSS
+
+As on agatti, with a third CSIPHY, CSID and TFE and the PPI bridges.
+Only stream 0x400 is listed: the stock DT gives the other streams to
+OPE and CDM, which aren't used.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ekTBjucpaN4ypc4DaZ
+---
+ arch/arm64/boot/dts/qcom/sm6225.dtsi | 197 +++++++++++++++++++++++++++
+ 1 file changed, 197 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6225.dtsi b/arch/arm64/boot/dts/qcom/sm6225.dtsi
+index 8e89a3220..586d3b2a3 100644
+--- a/arch/arm64/boot/dts/qcom/sm6225.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm6225.dtsi
+@@ -598,3 +598,200 @@ thermal-zones {
+ 		CPU_ZONE(cpu0123, cpu0);
+ 	};
+ };
++
++/* Camera subsystem, as on agatti but with a third CSIPHY, CSID and TFE. */
++&soc {
++	cci: cci@5c1b000 {
++		compatible = "qcom,sm6225-cci", "qcom,msm8996-cci";
++		reg = <0x0 0x05c1b000 0x0 0x1000>;
++
++		interrupts = <GIC_SPI 206 IRQ_TYPE_EDGE_RISING>;
++
++		clocks = <&gcc GCC_CAMSS_TOP_AHB_CLK>, <&gcc GCC_CAMSS_CCI_0_CLK>;
++		clock-names = "ahb", "cci";
++		assigned-clocks = <&gcc GCC_CAMSS_CCI_0_CLK>;
++		assigned-clock-rates = <37500000>;
++
++		power-domains = <&gcc GCC_CAMSS_TOP_GDSC>;
++
++		pinctrl-0 = <&cci0_default &cci1_default>;
++		pinctrl-names = "default";
++
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		status = "disabled";
++
++		cci_i2c0: i2c-bus@0 {
++			reg = <0>;
++			clock-frequency = <400000>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++		};
++
++		cci_i2c1: i2c-bus@1 {
++			reg = <1>;
++			clock-frequency = <400000>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++		};
++	};
++
++	camss: camss@5c11000 {
++		compatible = "qcom,sm6225-camss";
++
++		reg = <0x0 0x05c11000 0x0 0x1000>,
++		      <0x0 0x05c6e000 0x0 0x1000>,
++		      <0x0 0x05c75000 0x0 0x1000>,
++		      <0x0 0x05c7c000 0x0 0x1000>,
++		      <0x0 0x05c52000 0x0 0x2000>,
++		      <0x0 0x05c54000 0x0 0x2000>,
++		      <0x0 0x05c56000 0x0 0x2000>,
++		      <0x0 0x05cb3000 0x0 0x200>,
++		      <0x0 0x05cb3200 0x0 0x200>,
++		      <0x0 0x05cb3400 0x0 0x200>,
++		      <0x0 0x05c6f000 0x0 0x4000>,
++		      <0x0 0x05c76000 0x0 0x4000>,
++		      <0x0 0x05c7d000 0x0 0x4000>;
++		reg-names = "top",
++			    "csid0",
++			    "csid1",
++			    "csid2",
++			    "csiphy0",
++			    "csiphy1",
++			    "csiphy2",
++			    "ppi0",
++			    "ppi1",
++			    "ppi2",
++			    "vfe0",
++			    "vfe1",
++			    "vfe2";
++
++		clocks = <&gcc GCC_CAMERA_AHB_CLK>,
++			 <&gcc GCC_CAMSS_AXI_CLK>,
++			 <&gcc GCC_CAMSS_NRT_AXI_CLK>,
++			 <&gcc GCC_CAMSS_RT_AXI_CLK>,
++			 <&gcc GCC_CAMSS_TFE_0_CSID_CLK>,
++			 <&gcc GCC_CAMSS_TFE_1_CSID_CLK>,
++			 <&gcc GCC_CAMSS_TFE_2_CSID_CLK>,
++			 <&gcc GCC_CAMSS_CPHY_0_CLK>,
++			 <&gcc GCC_CAMSS_CSI0PHYTIMER_CLK>,
++			 <&gcc GCC_CAMSS_CPHY_1_CLK>,
++			 <&gcc GCC_CAMSS_CSI1PHYTIMER_CLK>,
++			 <&gcc GCC_CAMSS_CPHY_2_CLK>,
++			 <&gcc GCC_CAMSS_CSI2PHYTIMER_CLK>,
++			 <&gcc GCC_CAMSS_TOP_AHB_CLK>,
++			 <&gcc GCC_CAMSS_TFE_0_CLK>,
++			 <&gcc GCC_CAMSS_TFE_0_CPHY_RX_CLK>,
++			 <&gcc GCC_CAMSS_TFE_1_CLK>,
++			 <&gcc GCC_CAMSS_TFE_1_CPHY_RX_CLK>,
++			 <&gcc GCC_CAMSS_TFE_2_CLK>,
++			 <&gcc GCC_CAMSS_TFE_2_CPHY_RX_CLK>;
++		clock-names = "ahb",
++			      "axi",
++			      "camnoc_nrt_axi",
++			      "camnoc_rt_axi",
++			      "csi0",
++			      "csi1",
++			      "csi2",
++			      "csiphy0",
++			      "csiphy0_timer",
++			      "csiphy1",
++			      "csiphy1_timer",
++			      "csiphy2",
++			      "csiphy2_timer",
++			      "top_ahb",
++			      "vfe0",
++			      "vfe0_cphy_rx",
++			      "vfe1",
++			      "vfe1_cphy_rx",
++			      "vfe2",
++			      "vfe2_cphy_rx";
++
++		assigned-clocks = <&gcc GCC_CAMSS_TOP_AHB_CLK_SRC>,
++				  <&gcc GCC_CAMSS_AXI_CLK_SRC>;
++		assigned-clock-rates = <80000000>, <300000000>;
++
++		interrupts = <GIC_SPI 210 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 212 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 77 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 72 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 73 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 74 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 211 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 213 IRQ_TYPE_EDGE_RISING>,
++			     <GIC_SPI 78 IRQ_TYPE_EDGE_RISING>;
++		interrupt-names = "csid0",
++				  "csid1",
++				  "csid2",
++				  "csiphy0",
++				  "csiphy1",
++				  "csiphy2",
++				  "vfe0",
++				  "vfe1",
++				  "vfe2";
++
++		interconnects = <&bimc MASTER_AMPSS_M0 RPM_ACTIVE_TAG
++				 &config_noc SLAVE_CAMERA_CFG RPM_ACTIVE_TAG>,
++				<&mmrt_virt MASTER_CAMNOC_HF RPM_ALWAYS_TAG
++				 &bimc SLAVE_EBI_CH0 RPM_ALWAYS_TAG>,
++				<&mmnrt_virt MASTER_CAMNOC_SF RPM_ALWAYS_TAG
++				 &bimc SLAVE_EBI_CH0 RPM_ALWAYS_TAG>;
++		interconnect-names = "ahb",
++				     "hf_mnoc",
++				     "sf_mnoc";
++
++		iommus = <&apps_smmu 0x400 0x0>;
++
++		power-domains = <&gcc GCC_CAMSS_TOP_GDSC>;
++
++		status = "disabled";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++			};
++
++			port@1 {
++				reg = <1>;
++			};
++
++			port@2 {
++				reg = <2>;
++			};
++		};
++	};
++};
++
++&tlmm {
++	cci0_default: cci0-default-state {
++		pins = "gpio22", "gpio23";
++		function = "cci_i2c";
++		drive-strength = <2>;
++		bias-pull-up;
++	};
++
++	cci1_default: cci1-default-state {
++		pins = "gpio29", "gpio30";
++		function = "cci_i2c";
++		drive-strength = <2>;
++		bias-pull-up;
++	};
++
++	cam_mclk0_default: cam-mclk0-default-state {
++		pins = "gpio20";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	cam_mclk2_default: cam-mclk2-default-state {
++		pins = "gpio27";
++		function = "cam_mclk";
++		drive-strength = <2>;
++		bias-disable;
++	};
++};
+-- 
+2.43.0
+

@@ -1,0 +1,471 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 14:57:23 +0300
+Subject: [PATCH 21/23] media: qcom: camss: add SM6225
+
+SM6225 has three CSIPHY, CSID and TFE instances. TFE 530 and CSID 530
+match the 340 drivers at every offset they use, compared against the
+downstream register tables. The CSIPHY differs from QCM2290: its lane
+sequence comes from the downstream v1.2.1 table.
+
+A PPI bridge sits between CSIPHY and CSID. Downstream writes 0x70 to
+its config register for D-PHY, repeated here without knowing the bits.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ekTBjucpaN4ypc4DaZ
+---
+ .../platform/qcom/camss/camss-csid-340.c      |   7 +
+ .../media/platform/qcom/camss/camss-csid.c    |   6 +
+ .../media/platform/qcom/camss/camss-csid.h    |   1 +
+ .../qcom/camss/camss-csiphy-3ph-1-0.c         | 114 +++++++++++
+ drivers/media/platform/qcom/camss/camss-vfe.c |   2 +
+ drivers/media/platform/qcom/camss/camss.c     | 193 ++++++++++++++++++
+ drivers/media/platform/qcom/camss/camss.h     |   1 +
+ 7 files changed, 324 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csid-340.c b/drivers/media/platform/qcom/camss/camss-csid-340.c
+index eca3f07b8..f23a6b911 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid-340.c
++++ b/drivers/media/platform/qcom/camss/camss-csid-340.c
+@@ -55,6 +55,10 @@
+ #define CSID_CTRL_HALT_AT_FRAME_BOUNDARY		0
+ #define CSID_CTRL_RESUME_AT_FRAME_BOUNDARY		1
+ 
++/* PPI bridge between CSIPHY and CSID, present on TFE 530 */
++#define PPI_MODULE_CFG						(0x060)
++#define		PPI_MODULE_CFG_DPHY			0x70
++
+ enum csid_iface {
+ 	CSID_IFACE_PIX,
+ 	CSID_IFACE_RDI0,
+@@ -73,6 +77,9 @@ static void __csid_configure_rx(struct csid_device *csid, struct csid_phy_config
+ {
+ 	u32 val;
+ 
++	if (csid->ppi_base)
++		writel_relaxed(PPI_MODULE_CFG_DPHY, csid->ppi_base + PPI_MODULE_CFG);
++
+ 	val = FIELD_PREP(CSI2_RX_CFG0_NUM_ACTIVE_LANES_MASK, phy->lane_cnt - 1);
+ 	val |= FIELD_PREP(CSI2_RX_CFG0_DLX_INPUT_SEL_MASK, phy->lane_assign);
+ 	val |= FIELD_PREP(CSI2_RX_CFG0_PHY_NUM_SEL_MASK,
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+index 48459b46a..d24589040 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@ -1128,6 +1128,12 @@ int msm_csid_subdev_init(struct camss *camss, struct csid_device *csid,
+ 		csid->base = devm_platform_ioremap_resource_byname(pdev, res->reg[0]);
+ 		if (IS_ERR(csid->base))
+ 			return PTR_ERR(csid->base);
++
++		if (res->reg[1]) {
++			csid->ppi_base = devm_platform_ioremap_resource_byname(pdev, res->reg[1]);
++			if (IS_ERR(csid->ppi_base))
++				return PTR_ERR(csid->ppi_base);
++		}
+ 	}
+ 
+ 	/* Interrupt */
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.h b/drivers/media/platform/qcom/camss/camss-csid.h
+index 5296b10f6..c01592245 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.h
++++ b/drivers/media/platform/qcom/camss/camss-csid.h
+@@ -152,6 +152,7 @@ struct csid_device {
+ 	struct v4l2_subdev subdev;
+ 	struct media_pad pads[MSM_CSID_PADS_NUM];
+ 	void __iomem *base;
++	void __iomem *ppi_base;
+ 	u32 irq;
+ 	char irq_name[30];
+ 	u32 reg_update;
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c b/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
+index dac8d2ecf..09862217e 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
++++ b/drivers/media/platform/qcom/camss/camss-csiphy-3ph-1-0.c
+@@ -519,6 +519,115 @@ csiphy_lane_regs lane_regs_sm6350[] = {
+ 	{0x0000, 0x00, 0x00, CSIPHY_DNP_PARAMS},
+ };
+ 
++/* GEN2 2PH v1.2.1, from the stock khaje camera driver: lanes 0, clock, 1, 2, 3 */
++static const struct
++csiphy_lane_regs lane_regs_sm6225[] = {
++	{0x0030, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0900, 0x05, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0908, 0x10, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0904, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0904, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0004, 0x0c, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x002c, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0034, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0010, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x001c, 0x08, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x003c, 0xb8, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0008, 0x10, 0x00, CSIPHY_SETTLE_CNT_LOWER_BYTE},
++	{0x0000, 0x8d, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x000c, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0038, 0xfe, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0014, 0x80, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0028, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0024, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0800, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0884, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++
++	{0x0730, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c80, 0x05, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c88, 0x10, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c84, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c84, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0704, 0x0c, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x072c, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0734, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0710, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x071c, 0x08, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x073c, 0xb8, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0708, 0x10, 0x00, CSIPHY_SETTLE_CNT_LOWER_BYTE},
++	{0x0700, 0x80, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x070c, 0xa5, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0738, 0x1f, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0714, 0x80, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0728, 0x04, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0724, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0800, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0884, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++
++	{0x0230, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0a00, 0x05, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0a08, 0x10, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0a04, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0a04, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0204, 0x0c, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x022c, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0234, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0210, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x021c, 0x08, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x023c, 0xb8, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0208, 0x10, 0x00, CSIPHY_SETTLE_CNT_LOWER_BYTE},
++	{0x0200, 0x8d, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x020c, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0238, 0xfe, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0214, 0x80, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0228, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0224, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0800, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0884, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++
++	{0x0430, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0b00, 0x05, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0b08, 0x10, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0b04, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0b04, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0404, 0x0c, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x042c, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0434, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0410, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x041c, 0x08, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x043c, 0xb8, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0408, 0x10, 0x00, CSIPHY_SETTLE_CNT_LOWER_BYTE},
++	{0x0400, 0x8d, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x040c, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0438, 0xfe, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0414, 0x80, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0428, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0424, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0800, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0884, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++
++	{0x0630, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c00, 0x05, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c08, 0x10, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c04, 0x00, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0c04, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0604, 0x0c, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x062c, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0634, 0x07, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0610, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x061c, 0x08, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x063c, 0xb8, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0608, 0x10, 0x00, CSIPHY_SETTLE_CNT_LOWER_BYTE},
++	{0x0600, 0x8d, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x060c, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0638, 0xfe, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0614, 0x80, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0628, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0624, 0x00, 0x00, CSIPHY_DNP_PARAMS},
++	{0x0800, 0x02, 0x00, CSIPHY_DEFAULT_PARAMS},
++	{0x0884, 0x01, 0x00, CSIPHY_DEFAULT_PARAMS},
++};
++
+ /* 14nm 2PH v 2.0.1 2p5Gbps 4 lane DPHY mode */
+ static const struct
+ csiphy_lane_regs lane_regs_qcm2290[] = {
+@@ -1131,6 +1240,7 @@ static bool csiphy_is_gen2(u32 version)
+ 	switch (version) {
+ 	case CAMSS_2290:
+ 	case CAMSS_6150:
++	case CAMSS_6225:
+ 	case CAMSS_6350:
+ 	case CAMSS_7280:
+ 	case CAMSS_8250:
+@@ -1226,6 +1336,10 @@ static int csiphy_init(struct csiphy_device *csiphy)
+ 		regs->lane_regs = &lane_regs_qcm2290[0];
+ 		regs->lane_array_size = ARRAY_SIZE(lane_regs_qcm2290);
+ 		break;
++	case CAMSS_6225:
++		regs->lane_regs = &lane_regs_sm6225[0];
++		regs->lane_array_size = ARRAY_SIZE(lane_regs_sm6225);
++		break;
+ 	case CAMSS_6350:
+ 		regs->lane_regs = &lane_regs_sm6350[0];
+ 		regs->lane_array_size = ARRAY_SIZE(lane_regs_sm6350);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index 319d19158..af4366577 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -343,6 +343,7 @@ static u32 vfe_src_pad_code(struct vfe_line *line, u32 sink_code,
+ 	case CAMSS_660:
+ 	case CAMSS_2290:
+ 	case CAMSS_6150:
++	case CAMSS_6225:
+ 	case CAMSS_6350:
+ 	case CAMSS_7280:
+ 	case CAMSS_8x96:
+@@ -2029,6 +2030,7 @@ static int vfe_bpl_align_pix(struct vfe_device *vfe)
+ 
+ 	switch (vfe->camss->res->version) {
+ 	case CAMSS_2290:
++	case CAMSS_6225:
+ 		/* The alignment/bpl depends solely on the pixel format and is
+ 		 * computed dynamically in camss_format_get_bpl_alignment().
+ 		 */
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index 2123f6388..11d7cd2eb 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -820,6 +820,186 @@ static const struct resources_icc icc_res_2290[] = {
+ 	},
+ };
+ 
++static const struct camss_subdev_resources csiphy_res_6225[] = {
++	/* CSIPHY0 */
++	{
++		.regulators = {
++			{ .supply = "vdd-csiphy-0p9", .init_load_uA = 15900 },
++			{ .supply = "vdd-csiphy-1p2", .init_load_uA = 9000 }
++		},
++		.clock = { "top_ahb", "ahb", "csiphy0", "csiphy0_timer" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 256000000, 384000000 },
++				{ 100000000, 300000000 } },
++		.reg = { "csiphy0" },
++		.interrupt = { "csiphy0" },
++		.csiphy = {
++			.id = 0,
++			.hw_ops = &csiphy_ops_3ph_1_0,
++			.formats = &csiphy_formats_sdm845
++		}
++	},
++
++	/* CSIPHY1 */
++	{
++		.regulators = {
++			{ .supply = "vdd-csiphy-0p9", .init_load_uA = 15900 },
++			{ .supply = "vdd-csiphy-1p2", .init_load_uA = 9000 }
++		},
++		.clock = { "top_ahb", "ahb", "csiphy1", "csiphy1_timer" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 256000000, 384000000 },
++				{ 100000000, 300000000 } },
++		.reg = { "csiphy1" },
++		.interrupt = { "csiphy1" },
++		.csiphy = {
++			.id = 1,
++			.hw_ops = &csiphy_ops_3ph_1_0,
++			.formats = &csiphy_formats_sdm845
++		}
++	},
++
++	/* CSIPHY2 */
++	{
++		.regulators = {
++			{ .supply = "vdd-csiphy-0p9", .init_load_uA = 15900 },
++			{ .supply = "vdd-csiphy-1p2", .init_load_uA = 9000 }
++		},
++		.clock = { "top_ahb", "ahb", "csiphy2", "csiphy2_timer" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 256000000, 384000000 },
++				{ 100000000, 300000000 } },
++		.reg = { "csiphy2" },
++		.interrupt = { "csiphy2" },
++		.csiphy = {
++			.id = 2,
++			.hw_ops = &csiphy_ops_3ph_1_0,
++			.formats = &csiphy_formats_sdm845
++		}
++	}
++};
++
++static const struct camss_subdev_resources csid_res_6225[] = {
++	/* CSID0 */
++	{
++		.regulators = {},
++		.clock = { "top_ahb", "ahb", "csi0", "vfe0_cphy_rx", "vfe0" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 266571429, 426400000, 466500000 },
++				{ 0 },
++				{ 0 } },
++		.reg = { "csid0", "ppi0" },
++		.interrupt = { "csid0" },
++		.csid = {
++			.hw_ops = &csid_ops_340,
++			.parent_dev_ops = &vfe_parent_dev_ops,
++			.formats = &csid_formats_gen2
++		}
++	},
++
++	/* CSID1 */
++	{
++		.regulators = {},
++		.clock = { "top_ahb", "ahb", "csi1", "vfe1_cphy_rx", "vfe1" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 266571429, 426400000, 466500000 },
++				{ 0 },
++				{ 0 } },
++		.reg = { "csid1", "ppi1" },
++		.interrupt = { "csid1" },
++		.csid = {
++			.hw_ops = &csid_ops_340,
++			.parent_dev_ops = &vfe_parent_dev_ops,
++			.formats = &csid_formats_gen2
++		}
++	},
++
++	/* CSID2 */
++	{
++		.regulators = {},
++		.clock = { "top_ahb", "ahb", "csi2", "vfe2_cphy_rx", "vfe2" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 266571429, 426400000, 466500000 },
++				{ 0 },
++				{ 0 } },
++		.reg = { "csid2", "ppi2" },
++		.interrupt = { "csid2" },
++		.csid = {
++			.hw_ops = &csid_ops_340,
++			.parent_dev_ops = &vfe_parent_dev_ops,
++			.formats = &csid_formats_gen2
++		}
++	}
++};
++
++static const struct camss_subdev_resources vfe_res_6225[] = {
++	/* VFE0 */
++	{
++		.regulators = {},
++		.clock = { "top_ahb", "ahb", "axi", "vfe0", "camnoc_rt_axi", "camnoc_nrt_axi" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 0 },
++				{ 19200000, 256000000, 300000000, 384000000, 460800000, 576000000 },
++				{ 0 },
++				{ 0 } },
++		.reg = { "vfe0" },
++		.interrupt = { "vfe0" },
++		.vfe = {
++			.line_num = 4,
++			.hw_ops = &vfe_ops_340,
++			.formats_rdi = &vfe_formats_rdi_845,
++			.formats_pix = &vfe_formats_pix_845
++		}
++	},
++
++	/* VFE1 */
++	{
++		.regulators = {},
++		.clock = { "top_ahb", "ahb", "axi", "vfe1", "camnoc_rt_axi", "camnoc_nrt_axi" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 0 },
++				{ 19200000, 256000000, 300000000, 384000000, 460800000, 576000000 },
++				{ 0 },
++				{ 0 } },
++		.reg = { "vfe1" },
++		.interrupt = { "vfe1" },
++		.vfe = {
++			.line_num = 4,
++			.hw_ops = &vfe_ops_340,
++			.formats_rdi = &vfe_formats_rdi_845,
++			.formats_pix = &vfe_formats_pix_845
++		}
++	},
++
++	/* VFE2 */
++	{
++		.regulators = {},
++		.clock = { "top_ahb", "ahb", "axi", "vfe2", "camnoc_rt_axi", "camnoc_nrt_axi" },
++		.clock_rate = { { 0 },
++				{ 0 },
++				{ 0 },
++				{ 19200000, 256000000, 300000000, 384000000, 460800000, 576000000 },
++				{ 0 },
++				{ 0 } },
++		.reg = { "vfe2" },
++		.interrupt = { "vfe2" },
++		.vfe = {
++			.line_num = 4,
++			.hw_ops = &vfe_ops_340,
++			.formats_rdi = &vfe_formats_rdi_845,
++			.formats_pix = &vfe_formats_pix_845
++		}
++	}
++};
++
+ static const struct camss_subdev_resources csiphy_res_660[] = {
+ 	/* CSIPHY0 */
+ 	{
+@@ -5565,6 +5745,18 @@ static const struct camss_resources qcm2290_resources = {
+ 	.vfe_num = ARRAY_SIZE(vfe_res_2290),
+ };
+ 
++static const struct camss_resources sm6225_resources = {
++	.version = CAMSS_6225,
++	.csiphy_res = csiphy_res_6225,
++	.csid_res = csid_res_6225,
++	.vfe_res = vfe_res_6225,
++	.icc_res = icc_res_2290,
++	.icc_path_num = ARRAY_SIZE(icc_res_2290),
++	.csiphy_num = ARRAY_SIZE(csiphy_res_6225),
++	.csid_num = ARRAY_SIZE(csid_res_6225),
++	.vfe_num = ARRAY_SIZE(vfe_res_6225),
++};
++
+ static const struct camss_resources qcs8300_resources = {
+ 	.version = CAMSS_8300,
+ 	.pd_name = "top",
+@@ -5745,6 +5937,7 @@ static const struct of_device_id camss_dt_match[] = {
+ 	{ .compatible = "qcom,msm8953-camss", .data = &msm8953_resources },
+ 	{ .compatible = "qcom,msm8996-camss", .data = &msm8996_resources },
+ 	{ .compatible = "qcom,qcm2290-camss", .data = &qcm2290_resources },
++	{ .compatible = "qcom,sm6225-camss", .data = &sm6225_resources },
+ 	{ .compatible = "qcom,qcs8300-camss", .data = &qcs8300_resources },
+ 	{ .compatible = "qcom,sa8775p-camss", .data = &sa8775p_resources },
+ 	{ .compatible = "qcom,sc7280-camss", .data = &sc7280_resources },
+diff --git a/drivers/media/platform/qcom/camss/camss.h b/drivers/media/platform/qcom/camss/camss.h
+index 93d691c8a..fef63e418 100644
+--- a/drivers/media/platform/qcom/camss/camss.h
++++ b/drivers/media/platform/qcom/camss/camss.h
+@@ -83,6 +83,7 @@ enum camss_version {
+ 	CAMSS_660,
+ 	CAMSS_2290,
+ 	CAMSS_6150,
++	CAMSS_6225,
+ 	CAMSS_6350,
+ 	CAMSS_7280,
+ 	CAMSS_8x16,
+-- 
+2.43.0
+

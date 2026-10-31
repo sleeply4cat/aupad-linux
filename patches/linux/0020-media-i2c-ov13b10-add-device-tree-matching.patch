@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 14:57:23 +0300
+Subject: [PATCH 20/23] media: i2c: ov13b10: add device tree matching
+
+The driver is ACPI only, though its power handling already works on
+device tree systems. The CHUWI AuPad uses this sensor on SM6225.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ekTBjucpaN4ypc4DaZ
+---
+ drivers/media/i2c/ov13b10.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/media/i2c/ov13b10.c b/drivers/media/i2c/ov13b10.c
+index b0d34141a..5a589ff96 100644
+--- a/drivers/media/i2c/ov13b10.c
++++ b/drivers/media/i2c/ov13b10.c
+@@ -1705,11 +1705,18 @@ static const struct acpi_device_id ov13b10_acpi_ids[] = {
+ MODULE_DEVICE_TABLE(acpi, ov13b10_acpi_ids);
+ #endif
+ 
++static const struct of_device_id ov13b10_of_ids[] = {
++	{ .compatible = "ovti,ov13b10" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, ov13b10_of_ids);
++
+ static struct i2c_driver ov13b10_i2c_driver = {
+ 	.driver = {
+ 		.name = "ov13b10",
+ 		.pm = pm_ptr(&ov13b10_pm_ops),
+ 		.acpi_match_table = ACPI_PTR(ov13b10_acpi_ids),
++		.of_match_table = ov13b10_of_ids,
+ 	},
+ 	.probe = ov13b10_probe,
+ 	.remove = ov13b10_remove,
+-- 
+2.43.0
+

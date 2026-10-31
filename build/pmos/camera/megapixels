@@ -1,0 +1,6 @@
+#!/bin/sh
+# Alpine's Megapixels 2.1.0 walks its .dcp search paths with a char pointer, so the only lookup that
+# works is the suffix "%s,%s.dcp" relative to the working directory: start it next to the profile.
+# GTK's default Vulkan renderer leaves its GL preview empty.
+cd /usr/share/megapixels/config || exit 1
+GSK_RENDERER=gl exec /usr/bin/megapixels "$@"

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: CC0-1.0
+%YAML 1.1
+---
+# libcamera software ISP tuning for the CHUWI AuPad.  No Ccm: Android's matrices are correct with correct
+# white balance, but this AWB is off on scenes with clipped sky and they amplify the error (PORT.md Camera).
+version: 1
+algorithms:
+  - BlackLevel:
+      blackLevel: 4096
+  - Awb:
+  - Adjust:
+  - Agc:
+...

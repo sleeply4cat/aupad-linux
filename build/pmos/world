@@ -24,12 +24,17 @@ gnome-music
 gnome-sound-recorder
 gnome-text-editor
 gnome-weather
+grim
 hexagonrpcd
 hexagonrpcd-openrc
 hexagonrpcd-udev
+i2c-tools
 iw
 kmscube
+libcamera-tools
+libgpiod
 loupe
+megapixels
 mesa-dev
 mesa-dri-gallium
 mesa-utils
@@ -44,6 +49,8 @@ pd-mapper
 pd-mapper-openrc
 postmarketos-base
 postmarketos-ui-phosh
+postprocessd
+postprocessd-megapixels
 qrtr
 rmtfs
 rmtfs-openrc
@@ -52,6 +59,7 @@ showtime
 snapshot
 tqftpserv
 tqftpserv-openrc
+v4l-utils
 vulkan-loader
 vulkan-tools
 weston

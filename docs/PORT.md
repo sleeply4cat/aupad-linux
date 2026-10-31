@@ -43,7 +43,8 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 10. **Speakers, internal mic DONE 2026-10-31.** See Audio. Installed by hand, not packaged yet.
 11. **LTE data, GPS, cluster idle, Bluetooth audio DONE 2026-10-31.** See their sections. Greeter fix and firmware installed by hand.
 12. **Scripted OS rebuild, clean-tree kernel DONE 2026-10-31.** See Rootfs. Phosh, firmware and configs install from `build/pmos-install.sh`, not packaged yet.
-13. Then: boot hang, PM7250B charger, suspend, USB3.
+13. **Rear camera raw capture and libcamera DONE 2026-10-31.** See Camera. Focus motor and image tuning open, front camera parked until its ribbon is checked.
+14. Then: boot hang, PM7250B charger, suspend, USB3.
 
 ## Next steps (in order)
 
@@ -61,7 +62,7 @@ To go back to Android: run `build/boot-bcbclr.img`, then restore your own backup
 
 ## Unlocking: vbmeta
 
-The tablet is unlocked with a modified `vbmeta`, not the usual bootloader unlock. The procedure is widely known, but the right image depends on the tablet's state and stock OS version, and `vbmeta_a` and `vbmeta_b` can be
+The tablet is unlocked by a two-byte `devinfo` edit (bytes 13 and 14, 0 to 1) plus a `vbmeta` with flags 0x3, not the usual `fastboot flashing unlock`. ABL logs `VB: RWDeviceState: Succeed using devinfo!` and `Device is unlocked, Skipping boot verification` on every boot. Only the two together are known to work, neither was tested alone. The procedure is widely known, but the right image depends on the tablet's state and stock OS version, and `vbmeta_a` and `vbmeta_b` can be
 different builds, so they aren't interchangeable. Patch the image from the running slot, and back up everything first. `adb reboot edl` gets you into EDL as long as Android runs.
 A wrong `vbmeta` on the dev tablet gave a ramdump on every boot, cause never pinned down. adb is gone then, and only a magic cable, which forces EDL, got it back.
 
@@ -145,6 +146,33 @@ Card-removal polarity not verified: stock says ACTIVE_HIGH, and with the pull-up
 
 `pon_pwrkey`, `pon_resin` (volume down), `gpio-keys` on PM6125 GPIO 5 (volume up). All work, and power blanks and wakes the panel.
 Power-off works (`reboot: Power down`); with USB attached the PMIC starts the tablet again about 3 s later.
+
+## Camera (2026-10-31)
+
+Rear OV13B10 streams 2104x1560 SGRBG10 at 60 fps through csiphy0, csid0 and vfe0 rdi0. libcamera 0.7.1 lists it as `Internal back camera` and delivers RGB at about 15 fps with the default GPU software ISP or the CPU one. PipeWire exposes it as `Built-in Back Camera`, `pipewire-spa-libcamera` is installed, Snapshot takes photos. Checked on a real scene: a window view is recognisable, far objects look reasonably sharp, nearby ones blur. Colour has a pink-purple cast, no tuning file. libcamera at 2104x1560 returns a 2x centre crop, not the whole view: window bars 710 px apart against 355 in the raw binned frame, so it apparently runs the sensor at 4208x3120 and crops.
+
+- **Sensor:** Android's `sensor_id 0xd42` at 0x6c is OV13B10 at 7-bit 0x36, chip ID 0x560d42. `ov13b10.c` was ACPI-only, it now has an OF match. CCI master 0, MCLK0 19.2 MHz on gpio20, reset gpio18 (active low), four lanes at 560 MHz. Rails on PM8008 (i2c 0x08/0x09 on the CW2015 bus, reset gpio26, irq gpio25): L1 1.2 V vdig, L3 2.8 V vana, L7 1.8 V vio, L5 2.8 V vaf.
+- **CAMSS:** new `sm6225` resources, three CSIPHY, CSID and TFE. TFE 530 and CSID 530 match mainline's 340 drivers at every offset used, checked against the tables in stock `camera.ko` (symbols survive there: `cam_tfe_csid_530_*`, `tfe530_*`, `csiphy_2ph_v1_2_1_reg`, `cam_csid_ppi_100_reg_offset`). The CSIPHY is not qcm2290's: `lane_regs_sm6225` is generated from `csiphy_2ph_v1_2_1_reg`. A PPI bridge sits at 0x5cb3000, the driver writes 0x70 to its 0x60 for D-PHY. The value is read from the stock disassembly, its bits are not understood.
+- **`gpll10` needs `PLL_FSM_LEGACY_MODE`.** Stock's `clk_trion_pll_configure` sets it for `SUPPORTS_FSM_LEGACY_MODE`, mainline's did not, and the PLL failed to lock. It is the only PLL the TFE clock needs. Fixed in `clk-alpha-pll.c`: upstream candidate, and `gcc-sm6375.c` carries the same flag, so it changes behaviour there too.
+- **Focus motor:** DW9714 (stock module data says `dw9714v`) at 0x0c on CCI master 0, `dongwoon,dw9714`, L5 as vcc, gpio108 is its power-down line, active low. It only answers with L7 on, so `ldo7` is always-on: assumed to be the CCI pull-ups, not measured. `focus_absolute` 0..1023 moves the lens: on a far scene sharpness is flat at 0-200 and worse above, so about 200 steps are a dead zone and rest is near infinity. The control only holds while the subdev stays open. Nothing drives autofocus.
+- **Front camera: parked, treat as broken.** Its ribbon on the dev tablet may be disconnected, unchecked so far. The design has a GC5035 (Android tuning). Not seen: CCI master 1, gpio29/30, with L2, L6, L7 on, MCLK2 at 19.2 MHz (poked, stock asks 24 MHz), reset gpio24 and standby gpio70 both ways: no address answers (the last combinations of the scan timed out). Android also NACKed its probes there (expected IDs 0x5035 and 0x476) and reported one camera. Absent or a disconnected ribbon; no driver is written. Stock would use csiphy2.
+- **Android tuning:** the board's tuning binaries are in the vendor partition, `lib64/camera/com.qti.tuned.chuwi_ov13b10.bin`, with `com.qti.sensormodule.ov13b10.bin` beside it for power, modes and the motor name. A `cw_gc5035` tuning shows the design has a GC5035 front camera. They are proprietary, so neither the files nor numbers from them are in this repo.
+- **Colour:** rendered on the host from raw with measured white balance and the 5700 K matrix, a window view is neutral, so the matrices and the sensor data are good. Live, they don't work: libcamera's AWB counts clipped pixels (R gain 1.92 against 2.14 measured) and the matrix amplifies the error, giving green frames with pink sky. A/B on one scene: R/G 0.79 with `Ccm`, 0.91 without, and clearly better by eye. So `build/pmos/camera/ov13b10.yaml` has `BlackLevel` 4096 and no `Ccm`. No colour matrices are published here.
+- **Rotation:** the DT says `rotation = <270>`, not stock's 90. Snapshot writes EXIF from it, and with 90 the sky came out at the bottom. The real image needs 90 degrees clockwise. Megapixels has its own `Rotate: 270`. The 270 build boots and reports it, but a photo from it hasn't been checked yet.
+- **Megapixels 2.1:** `build/pmos/camera/`: `chuwi,aupad.conf` and the `/usr/local/bin/megapixels` wrapper. It also needs a DNG profile, `chuwi,aupad,Rear.dcp` (the sensor name is case-sensitive), which is not in this repo. The wrapper which starts it inside the config directory with `GSK_RENDERER=gl`. Preview draws upright, in full view, with ISO, exposure and focus controls. **It blinks red and green.** Bugs read from the 2.1.0 source:
+  - `src/process_pipeline.c`, AWB: applies the full correction from statistics that lag the gains, so it oscillates. R/G flips 0.65 to 1.55 even with an identity matrix. Needs damping.
+  - `src/dcp.c`: `for (const char *fmt = paths[0]; fmt; fmt++)` walks characters instead of strings, so it ends on some `/` string in rodata and prints `Found calibration file at /`. Only a suffix `%s,%s.dcp` relative to the working directory matches, hence the wrapper.
+  - `src/io_pipeline.c`, preview mode: integer division and `score = 0` leave no mode scoring above 0, so preview falls back to 4208x3120 and drops about two frames in three.
+  - `gles2_debayer_set_shading`: the order only works for mild matrices, so the profile's ForwardMatrix makes the product identity and is not a true ForwardMatrix.
+  **The port carries no app patches.** So Megapixels stays on the stock package and keeps blinking. Camera (Snapshot) is the camera app. Dropping the 13 MP mode doesn't help: no frame drops, but R/G 0.10 to 0.35. Saved Megapixels photos are unchecked.
+- **libcamera:** needs `CONFIG_DMABUF_HEAPS`, `DMABUF_HEAPS_SYSTEM`, `UDMABUF`. Leave `DMABUF_HEAPS_CMA` off: libcamera picks the small CMA heap and fails to allocate. `build/pmos/camera/62-aupad-camera.rules` opens the heap to group video.
+- **Keep `CONFIG_DMABUF_DEBUG` off.** With it, `dma_buf_map_attachment` gives importers a scatterlist with `length` 0 and no pages, on purpose, while `msm_iommu_pagetable_map` walks `sg->length` and `sg_phys()`. So every buffer imported from another driver mapped nothing: `len=c92000 sgsum=0 nents=23/23`. Symptoms were GPU translation faults from TP, `__arm_lpae_unmap` warnings from `msm_gem_close`, Snapshot taking photos with a dead preview, `cam` stuck in GPU mode, and enough warnings on the UART to take the tablet down. It is on by default with `DEBUG_KERNEL`. The msm side is a genuine upstream problem: this only hides it.
+- **No libcamera gain helper for this sensor:** metadata reports `AnalogueGain = 128`, the raw 1x code. AGC only moves exposure, so dim scenes stay dim.
+- **Snapshot:** fills the screen with a centre crop, and has no manual controls.
+- **Not done:** PIX path; binding docs (`ovti,ov13b10`, `qcom,sm6225-camss`, `qcom,sm6225-cci`); `vdd-l*-supply` on PM8008, S6 and S7 aren't described because a `regulator-min-microvolt` there would make RPM set them.
+- **I2C bus numbers change between boots** (CCI was 0/2 on one boot, 1/2 on another, and the touch bus moved). Pick buses by name.
+
+Test: `build/cam.sh [secs]` installs modules beside the running ones and RAM-boots. `build/pmos/camgrab W H N`, installed as `/usr/local/bin/camgrab`, captures raw to `/tmp/f.raw`, `CTRL=` passes sensor controls. Every `peek` argument is an address, so a count reads a real address: 16 reset the tablet.
 
 ## Sensors and rotation (2026-10-31)
 
@@ -237,7 +265,7 @@ from a local repo, which needs a `noarch -> aarch64` link; the USB proxy is too 
 - Added by hand: `user` (uid 10000), `/etc/NetworkManager/conf.d/50-aupad-usb0.conf` (NetworkManager must not touch
   usb0), `/etc/elogind/sleep.conf.d/50-aupad-nosuspend.conf` (suspend is untested).
 - **Rotation needs three settings together.** phoc ignores the panel's `rotation=<180>`, so `/etc/phosh/phoc.ini` has `[output:DSI-1] rotate = 180`.
-  Touch needs `/etc/udev/rules.d/60-aupad-touch.rules`, `LIBINPUT_CALIBRATION_MATRIX=-1 0 1 0 -1 1`. The sensor needs the mount matrix above.
+  Touch needs `/etc/udev/rules.d/60-aupad-touch.rules`, `LIBINPUT_CALIBRATION_MATRIX=-1 0 1 0 -1 1`. Match `DRIVERS=="edt_ft5x06"`, not the name: it ends in a byte read from the controller, usually `(e4)`, once `(ef)`, and a name match then silently loses the calibration. The sensor needs the mount matrix above.
   Weston behaves differently and would need the touch rule removed. All three belong in the device package.
 - Boot and session fixes: `swapfile` and `/etc/init.d/swap` collide with zram's
   virtual `swap` (services wait about 50 s, rc-update prints `swap is the name of a real and virtual service`); `kill-plymouth` removed; Evolution

@@ -1,0 +1,185 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 14:57:23 +0300
+Subject: [PATCH 23/23] arm64: dts: qcom: sm6225-chuwi-aupad: add the rear
+ camera
+
+OV13B10 on CCI master 0 with a DW9714 focus motor, powered from a
+PM8008 on the fuel gauge's I2C bus. gpio108, CAM_STANDBY0 in the stock
+DT, is the motor's power-down line. L7 stays on: the motor doesn't
+answer without it, even with its own L5 supply up.
+
+rotation is 270 rather than the stock 90: applications write it into
+photo metadata, and 90 stores them upside down on this tablet.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ekTBjucpaN4ypc4DaZ
+---
+ .../boot/dts/qcom/sm6225-chuwi-aupad.dts      | 138 ++++++++++++++++++
+ 1 file changed, 138 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+index f6321e049..a8dac7238 100644
+--- a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
++++ b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+@@ -382,12 +382,134 @@ &i2c1 {
+ 	clock-frequency = <100000>;
+ 	status = "okay";
+ 
++	pm8008: pmic@8 {
++		compatible = "qcom,pm8008";
++		reg = <0x8>;
++
++		interrupt-parent = <&tlmm>;
++		interrupts = <25 IRQ_TYPE_EDGE_RISING>;
++
++		reset-gpios = <&tlmm 26 GPIO_ACTIVE_LOW>;
++
++		pinctrl-0 = <&pm8008_default>;
++		pinctrl-names = "default";
++
++		gpio-controller;
++		#gpio-cells = <2>;
++		gpio-ranges = <&pm8008 0 0 2>;
++
++		interrupt-controller;
++		#interrupt-cells = <2>;
++
++		#thermal-sensor-cells = <0>;
++
++		regulators {
++			vreg_cam_vdig_rear: ldo1 {
++				regulator-name = "cam_vdig_rear";
++				regulator-min-microvolt = <1200000>;
++				regulator-max-microvolt = <1200000>;
++			};
++
++			vreg_cam_vdig_front: ldo2 {
++				regulator-name = "cam_vdig_front";
++				regulator-min-microvolt = <1200000>;
++				regulator-max-microvolt = <1200000>;
++			};
++
++			vreg_cam_vana_rear: ldo3 {
++				regulator-name = "cam_vana_rear";
++				regulator-min-microvolt = <2800000>;
++				regulator-max-microvolt = <2800000>;
++			};
++
++			vreg_cam_vaf: ldo5 {
++				regulator-name = "cam_vaf";
++				regulator-min-microvolt = <2800000>;
++				regulator-max-microvolt = <2800000>;
++			};
++
++			vreg_cam_vana_front: ldo6 {
++				regulator-name = "cam_vana_front";
++				regulator-min-microvolt = <2800000>;
++				regulator-max-microvolt = <2800000>;
++			};
++
++			vreg_cam_vio: ldo7 {
++				regulator-name = "cam_vio";
++				/* The CCI pull-ups hang off this: the focus motor needs it with the sensor off */
++				regulator-always-on;
++				regulator-min-microvolt = <1800000>;
++				regulator-max-microvolt = <1800000>;
++			};
++		};
++	};
++
+ 	fuel-gauge@62 {
+ 		compatible = "cellwise,cw2015";
+ 		reg = <0x62>;
+ 	};
+ };
+ 
++&camss {
++	vdd-csiphy-0p9-supply = <&vreg_l4a>;
++	vdd-csiphy-1p2-supply = <&vreg_l18a>;
++
++	status = "okay";
++
++	ports {
++		port@0 {
++			csiphy0_ep: endpoint {
++				data-lanes = <0 1 2 3>;
++				remote-endpoint = <&ov13b10_ep>;
++			};
++		};
++	};
++};
++
++&cci {
++	status = "okay";
++};
++
++&cci_i2c0 {
++	vcm: camera-lens@c {
++		compatible = "dongwoon,dw9714";
++		reg = <0x0c>;
++
++		vcc-supply = <&vreg_cam_vaf>;
++		powerdown-gpios = <&tlmm 108 GPIO_ACTIVE_LOW>;
++	};
++
++	camera@36 {
++		compatible = "ovti,ov13b10";
++		reg = <0x36>;
++
++		clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
++		assigned-clocks = <&gcc GCC_CAMSS_MCLK0_CLK>;
++		assigned-clock-rates = <19200000>;
++
++		reset-gpios = <&tlmm 18 GPIO_ACTIVE_LOW>;
++
++		pinctrl-0 = <&cam_mclk0_default>;
++		pinctrl-names = "default";
++
++		dovdd-supply = <&vreg_cam_vio>;
++		avdd-supply = <&vreg_cam_vana_rear>;
++		dvdd-supply = <&vreg_cam_vdig_rear>;
++
++		orientation = <1>;
++		rotation = <270>;
++		lens-focus = <&vcm>;
++
++		port {
++			ov13b10_ep: endpoint {
++				data-lanes = <1 2 3 4>;
++				link-frequencies = /bits/ 64 <560000000>;
++				remote-endpoint = <&csiphy0_ep>;
++			};
++		};
++	};
++};
++
+ &lpass_rx_macro {
+ 	status = "okay";
+ };
+@@ -481,6 +603,22 @@ wcd937x_tx: codec@0,3 {
+ &tlmm {
+ 	gpio-reserved-ranges = <0 4>, <14 4>;
+ 
++	pm8008_default: pm8008-default-state {
++		irq-pins {
++			pins = "gpio25";
++			function = "gpio";
++			drive-strength = <2>;
++			bias-disable;
++		};
++
++		reset-pins {
++			pins = "gpio26";
++			function = "gpio";
++			drive-strength = <2>;
++			bias-pull-up;
++		};
++	};
++
+ 	ts_int_default: ts-int-default-state {
+ 		pins = "gpio80";
+ 		function = "gpio";
+-- 
+2.43.0
+

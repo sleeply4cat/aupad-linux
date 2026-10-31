@@ -7,9 +7,10 @@ Mainline Linux 7.3-rc3 and postmarketOS on the CHUWI AuPad tablet: Qualcomm SM62
 attached, but setting it up rewrites partitions, and getting it wrong can leave you needing EDL. Keep a full backup.
 
 > [!WARNING]
-> **Non-standard unlock.** This tablet is unlocked with a modified `vbmeta`, not the usual bootloader unlock. The procedure is
-> widely known, but the right image depends on your tablet's state and stock OS version: `vbmeta_a` and `vbmeta_b` can be
-> different builds and aren't interchangeable. A wrong one can drop the tablet into a ramdump on every boot. `adb reboot edl`
+> **Non-standard unlock.** This tablet is unlocked by a two-byte `devinfo` edit plus a modified `vbmeta`, not the usual
+> `fastboot flashing unlock`. Only the two together are known to work. The procedure is widely known, but the right `vbmeta`
+> depends on your tablet's state and stock OS version: `vbmeta_a` and `vbmeta_b` can be different builds and aren't
+> interchangeable. A wrong one can drop the tablet into a ramdump on every boot. `adb reboot edl`
 > needs a running Android, so recovery then takes a magic cable. Patch the image from the slot you're running, and back up
 > everything first.
 
@@ -37,7 +38,8 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 | Battery | Partial | Gauge only, always "discharging". No charger driver |
 | Boot | Broken | Some boots freeze the whole SoC around 10 s |
 | Suspend | Partial | Works only with workarounds, no whole-chip sleep, USB lost on resume. Disabled |
-| Camera | Not started | |
+| Rear camera | Partial | OV13B10 through CAMSS and libcamera, works in Snapshot. Fixed focus in apps, no gain control, crops in portrait. Megapixels has controls but its preview blinks |
+| Front camera | Not working | GC5035 not detected, ribbon on the dev tablet unchecked |
 | USB3, packaging for pmaports | Not started | |
 
 Known gaps: a boot can freeze the whole SoC, and the kernel on disk then needs a host to recover, see "Boot hang" in the docs. The GPU doesn't vote the MX rail, so 1260 MHz is tested rather than guaranteed. The LP6280S display bias chip
@@ -47,11 +49,11 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 
 | Path | Contents |
 |---|---|
-| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, device tree |
+| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, camera, device tree |
 | `patches/u-boot/` | U-Boot series: UFS on SM6225, boot environment |
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
-| `build/` | Boot image, rootfs and test-loop scripts, initramfs, audio topology source and UCM profile |
+| `build/` | Boot image, rootfs and test-loop scripts, initramfs, audio topology source and UCM profile, camera config |
 | `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy, UART recorder, ramdump capture |
 | `docs/PORT.md` | Engineering notes |
 
