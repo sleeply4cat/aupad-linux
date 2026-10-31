@@ -30,10 +30,10 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 | Speakers | Works | Software volume, 14 dB under stock level |
 | Internal mic | Partial | Signal measured, not yet checked by ear |
 | Headphones, headset mic | Not tested | Jack ribbon disconnected on the dev tablet |
-| ADSP, CDSP, modem | Works | Firmware boots. ADSP crash recovery can panic the kernel |
+| ADSP, CDSP, modem | Partial | Firmware boots. ADSP crash recovery can panic the kernel. Reinserting a SIM while powered on needs a reboot |
 | Mobile data | Partial | LTE through ModemManager, ping tested on one SIM. Browsing and speed untested |
-| Calls, SMS | Not tested | |
-| GPS | Partial | Fixes through ModemManager. Apps through Geoclue untested |
+| Calls, SMS | Partial | USSD works from `mmcli`, the Phosh dialer shows no reply. No call audio driver. SMS untested |
+| GPS | Works | Fixes through ModemManager, confirmed on the tablet |
 | Battery | Partial | Gauge only, always "discharging". No charger driver |
 | Boot | Broken | Some boots freeze the whole SoC around 10 s |
 | Suspend | Partial | Works only with workarounds, no whole-chip sleep, USB lost on resume. Disabled |
