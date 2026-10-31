@@ -22,7 +22,7 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 | Touch | Works | Up to 10 points. Far-apart fingers glitch, also on stock |
 | Buttons | Works | Power-off restarts if USB is attached |
 | GPU | Works | GLES 3.2 and Weston. Vulkan loads |
-| Desktop | Works | Phosh with auto-rotate, installed by hand. Starts upside down if the tablet lies flat |
+| Desktop | Works | Phosh with auto-rotate, installed by `build/pmos-install.sh`. Starts upside down if the tablet lies flat |
 | Wi-Fi | Works | 2.4 and 5 GHz, generated MAC |
 | Bluetooth | Works | Pairing and A2DP audio, tested with one headset. Calls untested |
 | microSD | Partial | Reads work, writes and removal untested |

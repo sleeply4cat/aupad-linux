@@ -42,7 +42,8 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 9. **Phosh, buttons, auto-rotate DONE 2026-10-31.** See Desktop. Installed by hand, not packaged yet.
 10. **Speakers, internal mic DONE 2026-10-31.** See Audio. Installed by hand, not packaged yet.
 11. **LTE data, GPS, cluster idle, Bluetooth audio DONE 2026-10-31.** See their sections. Greeter fix and firmware installed by hand.
-12. Then: boot hang, PM7250B charger, suspend, USB3.
+12. **Scripted OS rebuild, clean-tree kernel DONE 2026-10-31.** See Rootfs. Phosh, firmware and configs install from `build/pmos-install.sh`, not packaged yet.
+13. Then: boot hang, PM7250B charger, suspend, USB3.
 
 ## Next steps (in order)
 
@@ -75,6 +76,9 @@ The rootfs isn't built with pmbootstrap yet. The host only packs files, and the 
 3. `build/ub.sh build/boot-stage2.img 60`: `test=stage2` runs `apk add --no-network` with scripts, configures
    the system, grows the filesystem. Rerunnable.
 4. `build/ub.sh build/boot-pmos.img 25`: `root=pmos`, the initramfs does the gadget, then switch_root.
+5. `build/pmos-install.sh` on the running base system: packages from `build/pmos/world`, then `build/pmos/overlay.tar.gz`, the user, ownership and services. About 6 minutes through `tools/usbproxy.py`; set the clock first, the fresh system's date breaks TLS.
+
+`build/mkoverlay.py` makes the overlay from a rootfs backup of a tablet that is already set up, `tar` streamed over ssh (BusyBox tar: `-X`, `-T`, no `--one-file-system`). The overlay is per-device and isn't in this repo: it holds stock firmware, the modem's rmtfs files, Wi-Fi and Bluetooth keys and the user's password hash. Never publish one. The first install has to follow the sections below by hand. `/home/user` starts empty.
 
 The pmOS signing key came from the `postmarketos-keys` package on the mirror (trust on first use; it does verify
 the index signature, not checked against a second source). Only local-install, no network on the tablet: new
@@ -168,6 +172,7 @@ it comes back by itself after a reboot. Speed not measured. Calls and SMS not tr
 - DSDS firmware doesn't activate the USIM itself: until something provisions it, `uim-get-card-status` shows `Primary GW: session doesn't exist`, the app stays `detected` and
   the modem searches forever. ModemManager does this, but it only takes the modem once `rmnet_ipa0` exists. Before that it says `No modems were found`.
 - `no-atr-received` in a slot just means no SIM there. Power off to insert one.
+- `sim-missing` from ModemManager doesn't prove there is no card: it's also what it reports while `Primary GW` has no session. Taking the SIM out and back in with the tablet on ended there (seen once): ModemManager recreates the modem after the SIM switch event, the app stays `detected` and nothing activates it; waited 2 minutes. A boot with the card in comes up by itself. Check with `qmicli -d qrtr://0 --device-open-proxy --uim-get-card-status`; `--uim-change-provisioning-session=slot=1,activate=yes,session-type=primary-gw-provisioning,aid=<USIM AID>` followed by `killall ModemManager` brings it back.
 - `nmcli c add type gsm ifname '*' con-name mobile apn internet ipv6.method ignore`, added by hand, is per-operator. Wi-Fi keeps the default route, metric 600 against 20700.
 - `rc-status` shows modemmanager `failed` while it works. Cosmetic: D-Bus activation starts it first, the service's own copy can't take the bus name, exits and respawns until
   supervise-daemon gives up. `rc-service restart` doesn't touch the D-Bus copy: use `killall ModemManager`.
@@ -182,7 +187,7 @@ Works through ModemManager, no kernel changes and no custom parts. Geoclue's sto
 
 - `mmcli -m any --location-enable-gps-nmea --location-enable-gps-raw`, then `--location-get`. Fix in 14 s when the modem has recent satellite data.
 - Cold, before ModemManager had the modem: first fix after 3 min 10 s, 19 m uncertainty, standalone, no SIM. It dropped after 4 s; not seen again, but no long run since.
-- An app using Geoclue isn't tested yet.
+- Confirmed by the user on the tablet, 2026-10-31.
 
 
 ## Suspend and power (2026-10-31)
@@ -217,6 +222,12 @@ Earphones paired and connected but had no sink. Three separate causes:
   file and unloads `module-bluetooth-policy` and `module-bluetooth-discover`. Belongs in the device package. Check with `logread | grep -c "Endpoint registered"`: 0 at the greeter.
 - The session's PulseAudio only registers endpoints if it starts with Bluetooth available: after `rfkill block` it stayed silent until `pulseaudio -k`. `rfkill block` also survives reboots here (`/var/lib/rfkill`).
 
+
+## Calls and SMS (2026-10-31)
+
+`calls` and `chatty` are in `build/pmos/world`. Calls saw the modem through ModemManager, Chatty started. USSD works with `mmcli --3gpp-ussd-initiate`, the operator's reply lands in the `network notification` field while the call itself ends in `Aborted: USSD terminated by network`. The Phosh dialer shows nothing for such a reply.
+
+Voice call audio has no path yet: no q6voice driver in `sound/soc/qcom/qdsp6` and no `VoiceCall` verb in our UCM. SMS is untested.
 
 ## Desktop (2026-10-31)
 
@@ -461,6 +472,7 @@ Adreno 610 v2, stock chipid 0x6010001, runs as `qcom,adreno-610.0` (0x6010000), 
 
 - `build/ub.sh <img> [secs]`: the normal loop, see Android-free loop.
 - `test=<name>` on the cmdline runs `/bin/t-<name>` from the initramfs (`build/tests/`).
+- The UART link queues. A flood of characters reaches U-Boot late and aborts fastboot with `Operation aborted.`; `tools/ubstop.py` is paced for this. Send commands one character at a time.
 - A test must never end parked: nothing but a person on the power button gets a parked CPU back.
 
 ## Rig

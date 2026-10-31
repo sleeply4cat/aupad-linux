@@ -24,3 +24,5 @@ stub/*.o
 stub/*.elf
 stub/*.bin
 stub/stub+Image
+/build/pmos/overlay.tar.gz
+/backup-*/
