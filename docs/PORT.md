@@ -41,7 +41,8 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 8. **Remoteprocs, Wi-Fi, Bluetooth, microSD DONE 2026-10-30.** See their sections.
 9. **Phosh, buttons, auto-rotate DONE 2026-10-31.** See Desktop. Installed by hand, not packaged yet.
 10. **Speakers, internal mic DONE 2026-10-31.** See Audio. Installed by hand, not packaged yet.
-11. Then: boot hang, PM7250B charger, suspend, USB3.
+11. **LTE data, GPS, cluster idle, Bluetooth audio DONE 2026-10-31.** See their sections. Greeter fix and firmware installed by hand.
+12. Then: boot hang, PM7250B charger, suspend, USB3.
 
 ## Next steps (in order)
 
@@ -49,13 +50,19 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 2. Device, kernel and firmware packages for pmaports. Firmware comes from your own device. U-Boot expects `/boot/boot.img` on `pmos`, so the
    installer's layout needs adapting.
 3. PM7250B charger driver: Phosh shows "discharging" even when charging, because `cw2015` has nothing to ask.
-4. Suspend. Audio leftovers: headphones and headset mic once the jack ribbon is back.
+4. Suspend: whole-chip sleep first, see Suspend and power. Audio leftovers: headphones and headset mic once the jack ribbon is back.
 5. Boot counter falling back to `/boot/boot.old`, so a hanging kernel on disk recovers without the UART.
 6. USB3 PHY, ICE, UFS interconnect votes, MX vote for the GPU.
 7. Clean up for upstreaming: real bindings, no stub in the chain.
 8. Open: PMU root cause (see Stability gotchas); kexec early hang (replaced by U-Boot).
 
 To go back to Android: run `build/boot-bcbclr.img`, then restore your own backup of recovery_b.
+
+## Unlocking: vbmeta
+
+The tablet is unlocked with a modified `vbmeta`, not the usual bootloader unlock. The procedure is widely known, but the right image depends on the tablet's state and stock OS version, and `vbmeta_a` and `vbmeta_b` can be
+different builds, so they aren't interchangeable. Patch the image from the running slot, and back up everything first. `adb reboot edl` gets you into EDL as long as Android runs.
+A wrong `vbmeta` on the dev tablet gave a ramdump on every boot, cause never pinned down. adb is gone then, and only a magic cable, which forces EDL, got it back.
 
 ## Rootfs (2026-10-30)
 
@@ -103,7 +110,7 @@ ADSP, CDSP and modem boot through PAS from the stock firmware. The sm6115 nodes 
   The only sign was `failed to announce new service`. It now retries for up to 1 s.
 - Modem crash recovery is not clean: after `stop`/`start` or a crash, it may need a reboot.
 - Kernel PD mapper prints `PDM: no support for the platform`; the userspace `pd-mapper` does the job.
-- Not done: fastrpc CMA, IPA (modem data), SIM or LTE. ModemManager runs but nothing was tested.
+- Not done: fastrpc CMA.
 
 ## Wi-Fi (2026-10-30)
 
@@ -118,7 +125,7 @@ WCN3950 on the modem (`qcom,wcn3990-wifi`, ath10k_snoc, chip_id 0x120, WLAN.HL.3
 
 ## Bluetooth (2026-10-30)
 
-Controller on, scan finds devices. Pairing and audio untested.
+Pairing and A2DP audio work, tested with one headset, see Bluetooth audio. Calls over Bluetooth untested.
 
 - The chip is **WCN3950**, not RB2's WCN3988: SOC 0x40070120, ROM 0x102, on uart3 (gpio 8-11), PMU `qcom,wcn3950-pmu`. WCN3988 settings ask for
   a nonexistent `apbtfw0a.tlv`. Firmware `qca/cmbtfw12.tlv` + `cmnv12.bin` from stock `vendor/bt_firmware`.
@@ -147,6 +154,69 @@ Accelerometer QMI8658, 0x6B on an ADSP-side I2C bus, so there is no plain IIO de
 - `/etc/udev/rules.d/61-aupad-accel.rules` sets `ACCEL_MOUNT_MATRIX="-1, 0, 0; 0, -1, 0; 0, 0, 1"` on `fastrpc-adsp`, the node the SSC driver
   reads it from. Without it every orientation is 180 degrees off.
 - Stock also lists stk3x1x light, ist8306 compass and bu52053nvx hall; iio-sensor-proxy shows none of them. Gyro not used.
+- Open, dropped for now: booted flat, the picture is upside down. Proxy stays `undefined`, so Phosh keeps `rotate = 180` from `phoc.ini`; one later
+  reading showed transform 0. `phoc.ini` may be the wrong way round for the current mount matrix. Restarting the proxy leaves Phosh unclaimed until reboot.
+
+## Mobile data (2026-10-31)
+
+LTE data works with the stock pmOS stack: ModemManager and NetworkManager, nothing custom. Registered on LTE, ping through `qmapmux0.0` at about 45 ms, and
+it comes back by itself after a reboot. Speed not measured. Calls and SMS not tried.
+
+- IPA is v4.2 (stock `qcom,ipa-hw-ver = <0x10>`), the same as SC7180, so no driver change. Node from `agatti.dtsi` (same addresses, IRQs, SID 0x140, RPM clock), compatible
+  `qcom,sm6225-ipa`, `qcom,sc7180-ipa`, with a new `sram` node: agatti has none and the driver would fall back to SC7180's IMEM address. Stock has IMEM at `0xc123000`, size `0x2000`.
+- AP loads the GSI firmware, PAS 15: stock `ipa_fws.mdt`, `.b00`-`.b04` in `/lib/firmware/qcom/sm6225/aupad/`. It is relocatable, `pil_ipa_fw_mem` holds it. Not `scuba_ipa_fws`.
+- DSDS firmware doesn't activate the USIM itself: until something provisions it, `uim-get-card-status` shows `Primary GW: session doesn't exist`, the app stays `detected` and
+  the modem searches forever. ModemManager does this, but it only takes the modem once `rmnet_ipa0` exists. Before that it says `No modems were found`.
+- `no-atr-received` in a slot just means no SIM there. Power off to insert one.
+- `nmcli c add type gsm ifname '*' con-name mobile apn internet ipv6.method ignore`, added by hand, is per-operator. Wi-Fi keeps the default route, metric 600 against 20700.
+- `rc-status` shows modemmanager `failed` while it works. Cosmetic: D-Bus activation starts it first, the service's own copy can't take the bus name, exits and respawns until
+  supervise-daemon gives up. `rc-service restart` doesn't touch the D-Bus copy: use `killall ModemManager`.
+- No SIM gives ModemManager state `failed`, reason `sim-missing`, and NetworkManager `unavailable`. That is normal, not a fault.
+- Logged once at IPA setup: `unexpected init_completed response`, the uC finished before `uc_powered` was set, so `uc_loaded` stays false. Data works, but look here if
+  modem restart or module removal misbehaves.
+
+
+## GPS (2026-10-31)
+
+Works through ModemManager, no kernel changes and no custom parts. Geoclue's stock `geoclue.conf` has `[modem-gps]` enabled.
+
+- `mmcli -m any --location-enable-gps-nmea --location-enable-gps-raw`, then `--location-get`. Fix in 14 s when the modem has recent satellite data.
+- Cold, before ModemManager had the modem: first fix after 3 min 10 s, 19 m uncertainty, standalone, no SIM. It dropped after 4 s; not seen again, but no long run since.
+- An app using Geoclue isn't tested yet.
+
+
+## Suspend and power (2026-10-31)
+
+Running: schedutil on both clusters, `psci_idle` CPU power collapse, GPU and UFS devfreq. Battery gauge gives no current (`current_now=0`), so savings can't be measured yet.
+
+s2idle (`rtcwake -d rtc0 -m freeze -s 15`, `qcom_stats` loaded) completes only with both workarounds, and stays disabled in elogind until the items below are done:
+
+- **UART:** default settings freeze the SoC while devices suspend, silent, `RST_STAT 03`, 2 of 2 runs. `echo N > /sys/module/printk/parameters/console_suspend` avoids it, 2 of 2. Same family
+  as "unbinding the UART panics", and the same reset signature as the boot hang; a link between them isn't proven.
+- **ADSP:** with sensors running, resume gives `fatal error received: err_qdi.c:1045:EX:sensor_process: frpc_dsp`, 1 of 1. Stopping `iio-sensor-proxy` and `hexagonrpcd-adsp-sensorspd` first avoids it, 1 of 1.
+  Probably the frozen hexagonrpcd, not proven.
+- **ADSP recovery panics:** audio teardown, then SError in `swrm_wait_for_wr_fifo_done` from `pm_runtime_work`, 9 s later. Separate bug: any ADSP crash can kill the system.
+- **USB doesn't come back:** `dwc3: failed to enable ep0out`, UDC `not attached`, ssh gone until reboot. Results then only over the serial console. Wi-Fi rejoins by itself.
+- **Cluster idle, fixed.** Firmware rejected SM6115's parameters, so genpd showed Usage 0 and millions Rejected (that counter means PSCI failed, not a governor decision). sm6225.dtsi now
+  uses stock's one state per cluster, `0x41000043`, plus a parent domain with `cci-pc`, `0x42000343`. `cci-ret` `0x42000043` is in stock's DT too but returns INVALID_PARAMETERS (-22): left out.
+  Occasional -95 and -1 are normal, a wake arrived during entry. Six reboots clean, then 10 minutes up, no dumps. Too few to say anything about the boot hang.
+- **What wakes a suspend:** with services and radios up, CCI got 1204 entries in 30 s, with 19 ms of residency. With greetd, sensors and ModemManager stopped, `rfkill block all` and the gadget detached: 1 entry in 60 s.
+- **`vlow` and `vmin` still 0** even then, Client Votes unchanged at `0x83818581`. RPM isn't allowing it. Next suspects: `clk_ignore_unused`, `pd_ignore_unused`, USB attached. Decoding the votes would help.
+- Detaching the gadget avoids `dwc3 ... failed to suspend: -11` on a second suspend, but reattaching still gives `failed to enable ep0out`. `HS-PHY not in L2` comes first.
+- After resume with `console_suspend=N`, the UART loses incoming characters (`input overrun`, `Unbalanced pm_runtime_enable`). TX is fine. Type slowly to get a command through.
+- A failed `rtcwake` says `write error`; check `/sys/power/suspend_stats`, and don't trust counters from such a run.
+- Only the RTC wake is tested; power button isn't. `clk_ignore_unused pd_ignore_unused` still on the cmdline, removal untested.
+
+
+## Bluetooth audio (2026-10-31)
+
+Earphones paired and connected but had no sink. Three separate causes:
+
+- Kernel lacked `BT_RFCOMM`, `BT_BNEP`, `BT_LE`, `INPUT_UINPUT`. BlueZ logged `RFCOMM server failed` and `AVRCP: failed to create uinput`. All on now.
+- Greeter's PulseAudio (uid 105) outlives the greeter, its runtime dir gone, nothing can reach it, and it holds the A2DP endpoints. `/var/lib/greetd/.config/pulse/default.pa` includes the stock
+  file and unloads `module-bluetooth-policy` and `module-bluetooth-discover`. Belongs in the device package. Check with `logread | grep -c "Endpoint registered"`: 0 at the greeter.
+- The session's PulseAudio only registers endpoints if it starts with Bluetooth available: after `rfkill block` it stayed silent until `pulseaudio -k`. `rfkill block` also survives reboots here (`/var/lib/rfkill`).
+
 
 ## Desktop (2026-10-31)
 

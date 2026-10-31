@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Fri, 30 Oct 2026 22:04:35 +0300
-Subject: [PATCH 05/15] soc: qcom: ubwc: add SM6225
+Subject: [PATCH 05/18] soc: qcom: ubwc: add SM6225
 
 UBWC 1.0 with the highest bank bit at 14, as on SM6115.
 

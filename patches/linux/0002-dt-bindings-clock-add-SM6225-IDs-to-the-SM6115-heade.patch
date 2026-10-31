@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Fri, 30 Oct 2026 22:04:34 +0300
-Subject: [PATCH 02/15] dt-bindings: clock: add SM6225 IDs to the SM6115
+Subject: [PATCH 02/18] dt-bindings: clock: add SM6225 IDs to the SM6115
  headers
 
 SM6225 (khaje) is a bengal derivative and shares sm6115.dtsi, so extend the

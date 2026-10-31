@@ -1,0 +1,6 @@
+# /var/lib/greetd/.config/pulse/default.pa
+# The greeter's PulseAudio outlives the greeter and would keep Bluetooth audio from the user session
+.include /etc/pulse/default.pa
+.nofail
+unload-module module-bluetooth-policy
+unload-module module-bluetooth-discover

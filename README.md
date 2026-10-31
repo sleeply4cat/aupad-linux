@@ -6,27 +6,37 @@ Mainline Linux 7.3-rc3 and postmarketOS on the CHUWI AuPad tablet: Qualcomm SM62
 **Status: bring-up.** It's a working developer port, not an installable release. It boots from UFS with no host
 attached, but setting it up rewrites partitions, and getting it wrong can leave you needing EDL. Keep a full backup.
 
+> [!WARNING]
+> **Non-standard unlock.** This tablet is unlocked with a modified `vbmeta`, not the usual bootloader unlock. The procedure is
+> widely known, but the right image depends on your tablet's state and stock OS version: `vbmeta_a` and `vbmeta_b` can be
+> different builds and aren't interchangeable. A wrong one can drop the tablet into a ramdump on every boot. `adb reboot edl`
+> needs a running Android, so recovery then takes a magic cable. Patch the image from the slot you're running, and back up
+> everything first.
+
 | Area | Status | Notes |
 |---|---|---|
-| CPU, cpufreq, thermal | Works | PMU node removed: it hangs the SoC |
+| CPU, cpufreq, thermal | Works | Cluster and CCI idle work. PMU node removed: it hangs the SoC |
 | UFS | Works | HS-G3 x2 |
 | USB | Partial | Gadget only, HS. No USB3 PHY |
 | Display, backlight | Works | 60 Hz |
 | Touch | Works | Up to 10 points. Far-apart fingers glitch, also on stock |
 | Buttons | Works | Power-off restarts if USB is attached |
 | GPU | Works | GLES 3.2 and Weston. Vulkan loads |
-| Desktop | Works | Phosh with auto-rotate, installed by hand |
+| Desktop | Works | Phosh with auto-rotate, installed by hand. Starts upside down if the tablet lies flat |
 | Wi-Fi | Works | 2.4 and 5 GHz, generated MAC |
-| Bluetooth | Partial | Scan works, pairing untested |
+| Bluetooth | Works | Pairing and A2DP audio, tested with one headset. Calls untested |
 | microSD | Partial | Reads work, writes and removal untested |
 | Accelerometer | Works | Through the ADSP. Other sensors not exposed |
 | Speakers | Works | Software volume, 14 dB under stock level |
 | Internal mic | Partial | Signal measured, not yet checked by ear |
 | Headphones, headset mic | Not tested | Jack ribbon disconnected on the dev tablet |
-| ADSP, CDSP, modem | Partial | Firmware boots. Modem data and calls untested |
+| ADSP, CDSP, modem | Works | Firmware boots. ADSP crash recovery can panic the kernel |
+| Mobile data | Partial | LTE through ModemManager, ping tested on one SIM. Browsing and speed untested |
+| Calls, SMS | Not tested | |
+| GPS | Partial | Fixes through ModemManager. Apps through Geoclue untested |
 | Battery | Partial | Gauge only, always "discharging". No charger driver |
 | Boot | Broken | Some boots freeze the whole SoC around 10 s |
-| Suspend | Not tested | Disabled in the desktop setup |
+| Suspend | Partial | Works only with workarounds, no whole-chip sleep, USB lost on resume. Disabled |
 | Camera | Not started | |
 | USB3, packaging for pmaports | Not started | |
 
