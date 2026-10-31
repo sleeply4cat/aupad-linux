@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 14:57:23 +0300
-Subject: [PATCH 21/23] media: qcom: camss: add SM6225
+Subject: [PATCH 21/26] media: qcom: camss: add SM6225
 
 SM6225 has three CSIPHY, CSID and TFE instances. TFE 530 and CSID 530
 match the 340 drivers at every offset they use, compared against the

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 01:59:27 +0300
-Subject: [PATCH 12/23] ASoC: codecs: wcd937x-sdw: don't overrun the channel
+Subject: [PATCH 12/26] ASoC: codecs: wcd937x-sdw: don't overrun the channel
  tables
 
 The binding requires 12 tx-channel-mapping values, counting dmic7, but

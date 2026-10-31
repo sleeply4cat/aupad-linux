@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 00:44:24 +0300
-Subject: [PATCH 11/23] arm64: dts: qcom: sm6225-chuwi-aupad: add remoteprocs,
+Subject: [PATCH 11/26] arm64: dts: qcom: sm6225-chuwi-aupad: add remoteprocs,
  connectivity and inputs
 
 Enable ADSP, CDSP and modem with firmware from the device, Wi-Fi and

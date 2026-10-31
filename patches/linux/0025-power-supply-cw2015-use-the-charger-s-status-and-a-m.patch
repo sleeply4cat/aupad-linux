@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 15:30:53 +0300
+Subject: [PATCH 25/26] power: supply: cw2015: use the charger's status and a
+ measured current
+
+The driver only knows whether a charger is attached, so it reports
+Charging while a weak input loses to the load, and it can only estimate
+the current while discharging.
+
+Take the status from a supplier that reports one, unless that's plain
+Charging, so that 100% still reads Full. Take the current from an
+optional "ibat" IIO channel. With that channel, skip the reset of a gauge
+that looks stuck while charging: a SoC that stays put for 30 minutes is
+normal when input and load nearly cancel out.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../bindings/power/supply/cw2015_battery.yaml |  8 ++++
+ drivers/power/supply/Kconfig                  |  1 +
+ drivers/power/supply/cw2015_battery.c         | 39 ++++++++++++++++++-
+ 3 files changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/power/supply/cw2015_battery.yaml b/Documentation/devicetree/bindings/power/supply/cw2015_battery.yaml
+index f7bde3241..8621aa454 100644
+--- a/Documentation/devicetree/bindings/power/supply/cw2015_battery.yaml
++++ b/Documentation/devicetree/bindings/power/supply/cw2015_battery.yaml
+@@ -45,6 +45,14 @@ properties:
+ 
+   monitored-battery: true
+ 
++  io-channels:
++    items:
++      - description: Battery current, for a board that measures it elsewhere
++
++  io-channel-names:
++    items:
++      - const: ibat
++
+ required:
+   - compatible
+   - reg
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index c53c691fa..912f6934c 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -133,6 +133,7 @@ config BATTERY_CPCAP
+ config BATTERY_CW2015
+ 	tristate "CW2015 Battery driver"
+ 	depends on I2C
++	depends on IIO
+ 	select REGMAP_I2C
+ 	help
+ 	  Say Y here to enable support for the cellwise cw2015
+diff --git a/drivers/power/supply/cw2015_battery.c b/drivers/power/supply/cw2015_battery.c
+index 1bcb60cf7..181fad4ac 100644
+--- a/drivers/power/supply/cw2015_battery.c
++++ b/drivers/power/supply/cw2015_battery.c
+@@ -12,6 +12,7 @@
+ #include <linux/bits.h>
+ #include <linux/delay.h>
+ #include <linux/i2c.h>
++#include <linux/iio/consumer.h>
+ #include <linux/gfp.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+@@ -72,6 +73,7 @@ struct cw_battery {
+ 	int status;
+ 	int time_to_empty;
+ 	int charge_count;
++	struct iio_channel *ibat_chan;
+ 
+ 	u32 poll_interval_ms;
+ 	u8 alert_level;
+@@ -275,8 +277,12 @@ static int cw_get_soc(struct cw_battery *cw_bat)
+ 	}
+ 	cw_bat->read_errors = 0;
+ 
+-	/* Reset gauge if stuck while charging */
+-	if (cw_bat->status == POWER_SUPPLY_STATUS_CHARGING && soc == cw_bat->soc) {
++	/*
++	 * Reset gauge if stuck while charging.  Where the current is measured,
++	 * a charger too weak for the load is not a stuck gauge.
++	 */
++	if (!cw_bat->ibat_chan &&
++	    cw_bat->status == POWER_SUPPLY_STATUS_CHARGING && soc == cw_bat->soc) {
+ 		int max_stuck_cycles =
+ 			CW2015_BAT_CHARGING_STUCK_MS / cw_bat->poll_interval_ms;
+ 
+@@ -391,10 +397,20 @@ static void cw_update_status(struct cw_battery *cw_bat)
+ 	int status = POWER_SUPPLY_STATUS_DISCHARGING;
+ 
+ 	if (cw_bat->charger_attached) {
++		union power_supply_propval val;
++
+ 		if (cw_bat->soc >= 100)
+ 			status = POWER_SUPPLY_STATUS_FULL;
+ 		else
+ 			status = POWER_SUPPLY_STATUS_CHARGING;
++
++		/* A charger that reports its state may know better */
++		if (!power_supply_get_property_from_supplier(cw_bat->rk_bat,
++							     POWER_SUPPLY_PROP_STATUS,
++							     &val) &&
++		    val.intval != POWER_SUPPLY_STATUS_UNKNOWN &&
++		    val.intval != POWER_SUPPLY_STATUS_CHARGING)
++			status = val.intval;
+ 	}
+ 
+ 	if (cw_bat->status != status)
+@@ -514,6 +530,15 @@ static int cw_battery_get_property(struct power_supply *psy,
+ 		break;
+ 
+ 	case POWER_SUPPLY_PROP_CURRENT_NOW:
++		if (cw_bat->ibat_chan) {
++			int ret;
++
++			/* mA from IIO, positive when charging */
++			ret = iio_read_channel_processed_scale(cw_bat->ibat_chan,
++							       &val->intval, 1000);
++			return ret < 0 ? ret : 0;
++		}
++
+ 		if (cw_battery_valid_time_to_empty(cw_bat) &&
+ 		    cw_bat->battery->charge_full_design_uah > 0) {
+ 			/* calculate remaining capacity */
+@@ -663,6 +688,15 @@ static int cw_bat_probe(struct i2c_client *client)
+ 		return PTR_ERR(cw_bat->regmap);
+ 	}
+ 
++	cw_bat->ibat_chan = devm_iio_channel_get(cw_bat->dev, "ibat");
++	if (IS_ERR(cw_bat->ibat_chan)) {
++		if (PTR_ERR(cw_bat->ibat_chan) != -ENODEV)
++			return dev_err_probe(cw_bat->dev,
++					     PTR_ERR(cw_bat->ibat_chan),
++					     "Failed to get ibat channel\n");
++		cw_bat->ibat_chan = NULL;
++	}
++
+ 	ret = cw_init(cw_bat);
+ 	if (ret) {
+ 		dev_err(cw_bat->dev, "Init failed: %d\n", ret);
+@@ -760,3 +794,4 @@ MODULE_AUTHOR("xhc<xhc@rock-chips.com>");
+ MODULE_AUTHOR("Tobias Schramm <t.schramm@manjaro.org>");
+ MODULE_DESCRIPTION("cw2015/cw2013 battery driver");
+ MODULE_LICENSE("GPL");
++MODULE_IMPORT_NS("IIO_CONSUMER");
+-- 
+2.43.0
+

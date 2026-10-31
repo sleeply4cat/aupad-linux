@@ -36,7 +36,7 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
    blocks, 71.8 GB), SSH works, data survives. **Boots with no host** since U-Boot reads UFS: 10 s to network.
    Generic rootfs, no device/kernel packages.
 6. **Battery readout DONE 2026-10-30.** CW2015 on i2c1 (`0-0062`), PM7250B on SPMI SID 2/3 with ADC and temp
-   alarm. No charger driver: mainline has none for PM7250B here, the PMIC runs on bootloader settings (see Power).
+   alarm. Status and current through a read-only driver; the PMIC still runs on bootloader settings (see Power).
 7. **GPU DONE 2026-10-30.** A610 v2: GLES 3.2 (freedreno), Vulkan (Turnip), Weston, up to 1260 MHz, see GPU.
 8. **Remoteprocs, Wi-Fi, Bluetooth, microSD DONE 2026-10-30.** See their sections.
 9. **Phosh, buttons, auto-rotate DONE 2026-10-31.** See Desktop. Installed by hand, not packaged yet.
@@ -51,7 +51,7 @@ Engineering notes, oldest gotchas included. Start with the README. Paths like `b
 1. Boot hang: measure, isolate, fix. See that section.
 2. Device, kernel and firmware packages for pmaports. Firmware comes from your own device. U-Boot expects `/boot/boot.img` on `pmos`, so the
    installer's layout needs adapting.
-3. PM7250B charger driver: Phosh shows "discharging" even when charging, because `cw2015` has nothing to ask.
+3. PM7250B charger control: raising the input limit above 500 mA, behaviour from a low battery. Status readout is done, see Power.
 4. Suspend: whole-chip sleep first, see Suspend and power. Audio leftovers: headphones and headset mic once the jack ribbon is back.
 5. Boot counter falling back to `/boot/boot.old`, so a hanging kernel on disk recovers without the UART.
 6. USB3 PHY, ICE, UFS interconnect votes, MX vote for the GPU.
@@ -220,7 +220,7 @@ Works through ModemManager, no kernel changes and no custom parts. Geoclue's sto
 
 ## Suspend and power (2026-10-31)
 
-Running: schedutil on both clusters, `psci_idle` CPU power collapse, GPU and UFS devfreq. Battery gauge gives no current (`current_now=0`), so savings can't be measured yet.
+Running: schedutil on both clusters, `psci_idle` CPU power collapse, GPU and UFS devfreq. `current_now` on `cw2015-battery` is the measured battery current, so savings can now be measured (see Power).
 
 s2idle (`rtcwake -d rtc0 -m freeze -s 15`, `qcom_stats` loaded) completes only with both workarounds, and stays disabled in elogind until the items below are done:
 
@@ -328,8 +328,18 @@ Open risks:
 
 ## Power (2026-10-30)
 
-- `/sys/class/power_supply/cw2015-battery`: capacity and voltage. No battery profile in the DT, so the driver keeps
-  what's stored in the gauge. It always says Discharging, because nothing links it to a charger, and it has no current.
+- `/sys/class/power_supply/cw2015-battery`: capacity, voltage, status, current. No battery profile in the DT, so the driver
+  keeps what's stored in the gauge. Design capacity is 7000 mAh from public specs, not measured. Stock's 3812 mAh comes
+  from a generic "Alium 3600mAh" QG profile, so ignore it.
+- `qcom_smb5` (`charger@1000`, `reg` also has QG at 0x4800) is read only and gives `pm7250b-charger`. Online is
+  0x110b & 0x11. Status is 0x1006 low 3 bits, as in stock `smblib_get_prop_batt_status`. SMB2's `qcom_smbx` doesn't fit:
+  other offsets, 0x1007 bit 1 is OV, and it writes init values at probe.
+- Battery current is QG 0xc6 read with 0x42 bit 0 held, and 305.176 uA per bit on QG subtype 4 (from stock
+  `qg_get_battery_current`). The QG runs on bootloader settings. Scale is unchecked against a meter. `qcom_smb5` gives it to
+  `cw2015` over IIO, positive when charging. While the charger is charging, below -50 mA it reports Discharging: 500 mA
+  input loses to load (8 spinning CPUs: about -400 mA). `cw2015` skips its 30 min "SoC stuck" gauge reset when it has this channel.
+- Measured on USB at 98%: +145 mA idle, Charging; about -400 mA under load, Discharging; back within 5 s. Status
+  follows within one 8 s gauge poll. Phosh icons for charging, full and unplugged confirmed by eye.
 - PM7250B ADC in `/sys/bus/iio/devices` (`pmic@2`): `vbat_sns`, `usb_in_v_div_16`, `usb_in_i_uv`, temperatures.
 - Charger registers, read through `/sys/kernel/debug/regmap/0-02/registers` (reading it walks 64K SPMI registers):
   0x1042 charging enabled = 1, 0x1006 low 3 bits = 3. **It charges:** stock `qpnp-smb5-main.ko` has INHIBIT 0, TRICKLE

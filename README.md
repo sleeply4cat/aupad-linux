@@ -35,7 +35,7 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 | Mobile data | Partial | LTE through ModemManager, ping tested on one SIM. Browsing and speed untested |
 | Calls, SMS | Partial | USSD works from `mmcli`, the Phosh dialer shows no reply. No call audio driver. SMS untested |
 | GPS | Works | Fixes through ModemManager, confirmed on the tablet |
-| Battery | Partial | Gauge only, always "discharging". No charger driver |
+| Battery | Partial | Percentage, status and measured current work. No charger control: bootloader settings, 500 mA USB input, low battery untested |
 | Boot | Broken | Some boots freeze the whole SoC around 10 s |
 | Suspend | Partial | Works only with workarounds, no whole-chip sleep, USB lost on resume. Disabled |
 | Rear camera | Partial | OV13B10 through CAMSS and libcamera, works in Snapshot. Fixed focus in apps, no gain control, crops in portrait. Megapixels has controls but its preview blinks |
@@ -49,7 +49,7 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 
 | Path | Contents |
 |---|---|
-| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, camera, device tree |
+| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, camera, battery, device tree |
 | `patches/u-boot/` | U-Boot series: UFS on SM6225, boot environment |
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |

@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sat, 31 Oct 2026 15:30:54 +0300
+Subject: [PATCH 26/26] arm64: dts: qcom: sm6225-chuwi-aupad: add the battery
+ and charger
+
+Describe the PM7250B charger and link it to the CW2015 gauge, which now
+gets the charge status and battery current from it. The capacity is the
+tablet's specified 7000 mAh. The 3812 mAh stock reports comes from a
+generic profile in its device tree.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/qcom/pm7250b.dtsi           |  8 ++++++++
+ arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts | 13 +++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/pm7250b.dtsi b/arch/arm64/boot/dts/qcom/pm7250b.dtsi
+index 43cab0712..e0c0b8ac4 100644
+--- a/arch/arm64/boot/dts/qcom/pm7250b.dtsi
++++ b/arch/arm64/boot/dts/qcom/pm7250b.dtsi
+@@ -44,6 +44,14 @@ pmic@PM7250B_SID {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+ 
++		pm7250b_charger: charger@1000 {
++			compatible = "qcom,pm7250b-charger";
++			reg = <0x1000>,
++			      <0x4800>;
++			#io-channel-cells = <0>;
++			status = "disabled";
++		};
++
+ 		pm7250b_vbus: usb-vbus-regulator@1100 {
+ 			compatible = "qcom,pm7250b-vbus-reg", "qcom,pm8150b-vbus-reg";
+ 			reg = <0x1100>;
+diff --git a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+index a8dac7238..11d35172c 100644
+--- a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
++++ b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+@@ -21,6 +21,11 @@ / {
+ 	qcom,msm-id = <0x24a 0x10000>, <0x206 0x10000>;
+ 	qcom,board-id = <0x10022 0>;
+ 
++	battery: battery {
++		compatible = "simple-battery";
++		charge-full-design-microamp-hours = <7000000>;
++	};
++
+ 	backlight: backlight {
+ 		compatible = "pwm-backlight";
+ 		pwms = <&pm6125_pwm 0 106667>;
+@@ -287,6 +292,10 @@ vol_up_n: vol-up-n-state {
+ 	};
+ };
+ 
++&pm7250b_charger {
++	status = "okay";
++};
++
+ &pm6125_pwm {
+ 	status = "okay";
+ };
+@@ -447,6 +456,10 @@ vreg_cam_vio: ldo7 {
+ 	fuel-gauge@62 {
+ 		compatible = "cellwise,cw2015";
+ 		reg = <0x62>;
++		io-channels = <&pm7250b_charger>;
++		io-channel-names = "ibat";
++		monitored-battery = <&battery>;
++		power-supplies = <&pm7250b_charger>;
+ 	};
+ };
+ 
+-- 
+2.43.0
+
