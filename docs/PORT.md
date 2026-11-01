@@ -1,4 +1,4 @@
-# CHUWI AuPad (SM6225 "khaje") — mainline Linux / postmarketOS port
+# CHUWI AuPad (Snapdragon 680, SM6225 "khaje") — mainline Linux / postmarketOS port
 
 Engineering notes, oldest gotchas included. Start with the README. Paths like `build/` are relative to this repo.
 
@@ -520,9 +520,28 @@ Adreno 610 v2, stock chipid 0x6010001, runs as `qcom,adreno-610.0` (0x6010000), 
 - Unbrick: EDL with a firehose loader, bkerler's `edl` works. **Keep your own full backup first.** Never switch to
   slot A: the slot switch on this device also swaps partition type GUIDs.
 
-## Debug access
+## Debugging over USB: Qualcomm EUD (Embedded USB Debug)
 
-- **OpenOCD and GDB are the debug tools now (2026-11-01), `tools/ocd/`.** Upstream OpenOCD has an `eud` adapter driver. We use master `f13e839c5` plus `tools/ocd/eud-sm6225.patch` in `tools/ext/openocd`, with jimtcl built into `tools/ext/jim-inst`: `PKG_CONFIG_PATH=$PWD/../jim-inst/lib/pkgconfig ./configure --enable-eud --disable-werror && make`. Needs a `boot-eud.img`.
+EUD is a debug block inside Snapdragon SoCs that sits between the USB connector and the USB PHY. Once enabled it shows up on the host as a 7-port USB hub, `05c6:9500`, with its functions behind it: control `05c6:9501`, SWD `05c6:9504`, COM (UART) `05c6:9505`. That gives JTAG/SWD debugging and a serial console over the ordinary USB-C cable, with no JTAG probe, no UART wiring and the case closed, and it keeps working when the kernel's USB stack or the whole of Linux is dead. Whether it can be enabled depends on the device's fuses and debug policy. Here the stub enables it with secure monitor calls (SCM) before the kernel starts, `-DSTUB_EUD`. Background: [Linaro, "Hidden JTAG in a Qualcomm Snapdragon USB port"](https://www.linaro.org/blog/hidden-jtag-qualcomm-snapdragon-usb/).
+
+Debug image, EUD version 7 on SM6225. `nokaslr` keeps symbols valid; add `CONFIG_DEBUG_INFO_DWARF5` and `CONFIG_GDB_SCRIPTS` for source lines and the `lx-*` commands:
+
+```
+CMDLINE="earlycon=qcom_eud,0x1610000 console=ttyMSM0,115200n8 keep_bootcon ignore_loglevel clk_ignore_unused pd_ignore_unused rdinit=/init panic=10 root=pmos nokaslr" \
+EXTRA="-DSTUB_WDT=120 -DSTUB_EUD=20" stub/mkstub.sh build/boot-eud.img
+```
+
+### Kernel console without a UART: EUD COM earlycon
+
+`drivers/tty/serial/qcom_eud_earlycon.c`, `CONFIG_SERIAL_QCOM_EUD_EARLYCON`. `earlycon=qcom_eud,0x1610000 keep_bootcon` on the command line, `-DSTUB_EUD=20` in the stub, Host: `venv/bin/python tools/eudlog.py`, leave it running, it follows reboots and appends to `logs/eud/`. No gadget or Linux USB involved.
+- Starts at the first kernel line, `[0.000000] Linux version`, replayed from the log buffer once `earlycon` is parsed. Nothing from the stub or a crash before `parse_early_param`. The stub holds up to 20 s and releases 1.5 s after it sees the host's `COM_EN`, so about 3 s after the logger attaches.
+- Tested: 10000 lines exact and in order, last line of a panic arrives, runs beside OpenOCD SWD and GDB, no host means no output and a normal boot. `earlycon` takes one device, so the UART starts at `ttyMSM0`, without its own early output. Speed is capped by the UART while `ttyMSM0` is a console, about 150 lines/s, and a burst stays queued: count after it drains.
+- `0x1610070` mirrors the low byte of the host's CTLOUT, bytes repeated across the word; `COM_EN` is bit 5. The console reads it and drops output with no host. Kernel header calls `0x74` CTL_OUT_1, that's the next byte.
+- **The block has to be mapped non-posted.** With `ioremap` or `earlycon`'s posted mapping about 1 packet in 1000 is lost or damaged, and a read back after each byte or waiting for ready to drop only reduced it: 197 lost and 135 damaged of 200000. `ioremap_np`: none of 200000, the driver remaps its fixmap page. Writing `LEN` after the bytes sends nothing. RX still unsolved.
+
+### OpenOCD and GDB: kernel and RPM debugging over SWD
+
+- **`tools/ocd/`: OpenOCD and GDB, debugging all 8 Kryo cores and the RPM (Resource Power Manager, a Cortex-M3) over SWD.** Upstream OpenOCD has an `eud` adapter driver. We use master `f13e839c5` plus `tools/ocd/eud-sm6225.patch` in `tools/ext/openocd`, with jimtcl built into `tools/ext/jim-inst`: `PKG_CONFIG_PATH=$PWD/../jim-inst/lib/pkgconfig ./configure --enable-eud --disable-werror && make`. Needs an image built as above.
   - **`tools/ocd/g kernel [gdb args]` and `tools/ocd/g rpm [gdb args]` are the way in.** `tools/ocd/up` starts or recovers the server, resets the EUD hub when its control function is missing, and `g` calls it. Tcl on 6666, `tools/ocd/oc 'cmd' ...` runs commands. GDB: `rpm` on 3333, the Kryo SMP group on 3334, all 8 cores as threads. `tools/ocd/khaje.cfg` is the target; Kryo needs `kryo` (examine all) first, `g` does that.
   - Verified with GDB 2026-11-01, kernel #43 with DWARF and `GDB_SCRIPTS`: source lines, structs, `lx-version`, `lx-ps`, `lx-dmesg`, `$lx_current()` (gave `sync`, right pid, in a breakpoint), hardware breakpoint on a named core and `finish`, write watchpoint on `jiffies_64` (hit `tick_do_update_jiffies64` on 2 cores, values right), stepi, backtraces from EL1 down to `el0t_64_sync`. `monitor sysregs N` reads the EL1 state; `VBAR_EL1` = `vectors`, `SP_EL0` = `init_task` on an idle core, MPIDR and MIDR right per core. 12 of 12 reconnects, RPM RAM read 55 KB/s without halting, a stop about 0.6 s. Killing GDB with a breakpoint armed clears it and resumes. The patch also adds `aarch64 mrs` and an `SP_EL0` register, and drops the per-collapse reset message to debug level (it was 80 lines/s).
   - **Don't leave the RPM halted.** Linux's regulator request times out, `failed to enable regulators, err=-110` on the UFS PHY, UFS is dead until reboot and userspace sticks in D state. One run, halted about 1 min. A halted-RPM boot is disposable: don't run Kryo tests on it.

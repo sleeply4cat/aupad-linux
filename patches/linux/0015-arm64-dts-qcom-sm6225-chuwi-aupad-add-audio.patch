@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 01:59:27 +0300
-Subject: [PATCH 15/26] arm64: dts: qcom: sm6225-chuwi-aupad: add audio
+Subject: [PATCH 15/27] arm64: dts: qcom: sm6225-chuwi-aupad: add audio
 
 The ADSP runs AudioReach, so replace sm6115's APR services with GPR.
 Add the RX, TX and VA macros, both SoundWire masters and the static

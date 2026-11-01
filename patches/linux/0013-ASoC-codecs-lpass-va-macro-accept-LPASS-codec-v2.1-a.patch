@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 01:59:27 +0300
-Subject: [PATCH 13/26] ASoC: codecs: lpass-va-macro: accept LPASS codec v2.1
+Subject: [PATCH 13/27] ASoC: codecs: lpass-va-macro: accept LPASS codec v2.1
  and v2.2
 
 SM6225 uses the sm6115 compatible, and its VA macro reports v2.2.0, so

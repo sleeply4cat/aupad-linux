@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 03:45:58 +0300
-Subject: [PATCH 17/26] arm64: dts: qcom: sm6225: use the khaje cluster idle
+Subject: [PATCH 17/27] arm64: dts: qcom: sm6225: use the khaje cluster idle
  states
 
 CPU_SUSPEND fails for all of the states inherited from SM6115, so a

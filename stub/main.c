@@ -382,10 +382,18 @@ u64 stub_main(u64 dtb, u64 base, u64 x1, u64 x2, u64 x3)
 	wr(0x01611014, 1);		/* CSR_EUD_EN */
 	kv("EUD mode_mgr2", smc_call(0xc2000502UL, 2, 0x1612000, 1));
 	kv("EUD en", rd(0x01611014));
-	/* Hold the kernel back until the host has enumerated EUD and connected: 8-16 s otherwise. */
+	/*
+	 * Hold the kernel back until the host has enumerated EUD and connected: 8-16 s otherwise.  COM_EN in CTL_OUT
+	 * means tools/eudlog.py is there: release, after the time it takes to open the function that just appeared.
+	 */
 	t0 = read_cntpct();
 	while (read_cntpct() - t0 < STUB_EUD * 1000000UL * ticks_per_us)
-		;
+		if (rd(0x01610070) & (1 << 5)) {
+			t0 = read_cntpct();
+			while (read_cntpct() - t0 < 1500000UL * ticks_per_us)
+				;
+			break;
+		}
 #endif
 
 	kimg = (u64)_stub_end;	/* adrp: runtime address */

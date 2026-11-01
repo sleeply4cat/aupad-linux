@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 15:30:53 +0300
-Subject: [PATCH 24/26] power: supply: add a status driver for the PM7250B
+Subject: [PATCH 24/27] power: supply: add a status driver for the PM7250B
  charger
 
 PM7250B has an SMB5 charger and a QG gauge block. Both run on what the

@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Sun, 1 Nov 2026 16:07:59 +0300
+Subject: [PATCH 27/27] tty: serial: add a boot console over Qualcomm EUD COM
+
+EUD sits between the USB connector and the PHY, so its COM peripheral
+keeps working when the kernel's USB stack doesn't. Output is dropped
+when the host hasn't enabled COM or has stopped reading, so a boot
+without one isn't slowed down.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/tty/serial/Kconfig             |  9 +++
+ drivers/tty/serial/Makefile            |  1 +
+ drivers/tty/serial/qcom_eud_earlycon.c | 89 ++++++++++++++++++++++++++
+ 3 files changed, 99 insertions(+)
+ create mode 100644 drivers/tty/serial/qcom_eud_earlycon.c
+
+diff --git a/drivers/tty/serial/Kconfig b/drivers/tty/serial/Kconfig
+index cf7dba473..ca17a4062 100644
+--- a/drivers/tty/serial/Kconfig
++++ b/drivers/tty/serial/Kconfig
+@@ -912,6 +912,15 @@ config SERIAL_MSM_CONSOLE
+ 	select SERIAL_CORE_CONSOLE
+ 	select SERIAL_EARLYCON
+ 
++config SERIAL_QCOM_EUD_EARLYCON
++	bool "Boot console over Qualcomm EUD COM"
++	depends on ARM64 && (ARCH_QCOM || COMPILE_TEST)
++	select SERIAL_EARLYCON
++	help
++	  Print the kernel log over the COM peripheral of Qualcomm's Embedded
++	  USB Debug, with earlycon=qcom_eud,<address>. EUD has to be enabled
++	  before the kernel starts. Add keep_bootcon to keep it after boot.
++
+ config SERIAL_QCOM_GENI
+ 	tristate "Qualcomm on-chip GENI based serial port support"
+ 	depends on ARCH_QCOM || COMPILE_TEST
+diff --git a/drivers/tty/serial/Makefile b/drivers/tty/serial/Makefile
+index bba7b21a4..b1e783beb 100644
+--- a/drivers/tty/serial/Makefile
++++ b/drivers/tty/serial/Makefile
+@@ -65,6 +65,7 @@ obj-$(CONFIG_SERIAL_PCH_UART)		+= pch_uart.o
+ obj-$(CONFIG_SERIAL_PIC32)		+= pic32_uart.o
+ obj-$(CONFIG_SERIAL_PXA_NON8250)	+= pxa.o
+ obj-$(CONFIG_SERIAL_PMACZILOG)		+= pmac_zilog.o
++obj-$(CONFIG_SERIAL_QCOM_EUD_EARLYCON) += qcom_eud_earlycon.o
+ obj-$(CONFIG_SERIAL_QCOM_GENI)		+= qcom_geni_serial.o
+ obj-$(CONFIG_SERIAL_QE)			+= ucc_uart.o
+ obj-$(CONFIG_SERIAL_RDA)		+= rda-uart.o
+diff --git a/drivers/tty/serial/qcom_eud_earlycon.c b/drivers/tty/serial/qcom_eud_earlycon.c
+new file mode 100644
+index 000000000..b40b1485a
+--- /dev/null
++++ b/drivers/tty/serial/qcom_eud_earlycon.c
+@@ -0,0 +1,89 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Boot console over the COM peripheral of Qualcomm's Embedded USB Debug.
++ *
++ * EUD sits between the USB connector and the PHY, so this keeps working when the kernel's USB stack doesn't. The
++ * bootloader or stub has to enable EUD. With keep_bootcon it lasts for the whole run.
++ *
++ *	earlycon=qcom_eud,0x1610000 keep_bootcon
++ */
++
++#include <linux/bits.h>
++#include <linux/console.h>
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/minmax.h>
++#include <linux/serial_core.h>
++
++#include <asm/fixmap.h>
++
++#define EUD_COM_TX_ID		0x00
++#define EUD_COM_TX_LEN		0x04
++#define EUD_COM_TX_DAT		0x08
++#define EUD_INT_STATUS		0x44
++#define EUD_INT_TX		BIT(1)
++#define EUD_CTL_OUT		0x70	/* mirrors the host's control register */
++#define EUD_CTL_COM_EN		BIT(5)
++
++#define EUD_COM_PACKET_ID	0x90
++#define EUD_COM_PACKET_MAX	14
++#define EUD_COM_TX_POLLS	100000
++
++static bool eud_com_tx_ready(void __iomem *base)
++{
++	static bool stalled;
++	unsigned int polls = stalled ? 1 : EUD_COM_TX_POLLS;
++
++	while (polls--) {
++		if (readl_relaxed(base + EUD_INT_STATUS) & EUD_INT_TX) {
++			stalled = false;
++			return true;
++		}
++	}
++
++	/* The host stopped reading: drop output, and don't spin for every line while it's away. */
++	stalled = true;
++	return false;
++}
++
++static void eud_com_write(struct console *con, const char *s, unsigned int n)
++{
++	struct earlycon_device *dev = con->data;
++	void __iomem *base = dev->port.membase;
++
++	while (n) {
++		unsigned int len = min(n, EUD_COM_PACKET_MAX);
++		unsigned int i;
++
++		/* No host: nothing would ever drain the packet. */
++		if (!(readl_relaxed(base + EUD_CTL_OUT) & EUD_CTL_COM_EN))
++			return;
++		if (!eud_com_tx_ready(base))
++			return;
++
++		writel_relaxed(EUD_COM_PACKET_ID, base + EUD_COM_TX_ID);
++		writel_relaxed(len, base + EUD_COM_TX_LEN);
++		for (i = 0; i < len; i++)
++			writel_relaxed(s[i], base + EUD_COM_TX_DAT);
++
++		s += len;
++		n -= len;
++	}
++}
++
++static int __init eud_com_setup(struct earlycon_device *dev, const char *opt)
++{
++	if (!dev->port.membase)
++		return -ENODEV;
++
++	/*
++	 * Earlycon maps the block as posted, where about 1 packet in 1000 is lost or damaged, also with a read back
++	 * after each write. Non-posted lost none of 200000.
++	 */
++	clear_fixmap(FIX_EARLYCON_MEM_BASE);
++	__set_fixmap(FIX_EARLYCON_MEM_BASE, dev->port.mapbase & PAGE_MASK, __pgprot(PROT_DEVICE_nGnRnE));
++
++	dev->con->write = eud_com_write;
++	return 0;
++}
++EARLYCON_DECLARE(qcom_eud, eud_com_setup);
+-- 
+2.43.0
+

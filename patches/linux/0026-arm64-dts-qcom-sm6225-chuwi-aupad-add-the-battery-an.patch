@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 15:30:54 +0300
-Subject: [PATCH 26/26] arm64: dts: qcom: sm6225-chuwi-aupad: add the battery
+Subject: [PATCH 26/27] arm64: dts: qcom: sm6225-chuwi-aupad: add the battery
  and charger
 
 Describe the PM7250B charger and link it to the CW2015 gauge, which now

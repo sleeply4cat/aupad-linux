@@ -1,6 +1,6 @@
 # Mainline Linux on the CHUWI AuPad
 
-Mainline Linux 7.3.1 and postmarketOS on the CHUWI AuPad tablet: Qualcomm SM6225 ("khaje"), board UNC6851 CW108-WW,
+Mainline Linux 7.3.1 and postmarketOS on the CHUWI AuPad tablet: Qualcomm Snapdragon 680 (SM6225, "khaje"), board UNC6851 CW108-WW,
 10.51" 1200x1920. Upstream has no SM6225 support, so this port builds on `sm6115.dtsi` and overrides what differs.
 
 **Status: bring-up.** It's a working developer port, not an installable release. It boots from UFS with no host
@@ -40,6 +40,7 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 | Suspend | Partial | Works only with workarounds, no whole-chip sleep, USB lost on resume. Disabled |
 | Rear camera | Partial | OV13B10 through CAMSS and libcamera, works in Snapshot. Fixed focus in apps, no gain control, crops in portrait. Megapixels has controls but its preview blinks |
 | Front camera | Not working | GC5035 not detected, ribbon on the dev tablet unchecked |
+| Debugging | Works | Qualcomm EUD over USB-C: OpenOCD and GDB, kernel log without a UART |
 | USB3, packaging for pmaports | Not started | |
 
 Known gaps: a boot can freeze the whole SoC, and the kernel on disk then needs a host to recover, see "Boot hang" in the docs. The GPU doesn't vote the MX rail, so 1260 MHz is tested rather than guaranteed. The LP6280S display bias chip
@@ -54,13 +55,25 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
 | `build/` | Boot image, rootfs and test-loop scripts, initramfs, audio topology source and UCM profile, camera config |
-| `tools/ocd/` | OpenOCD and GDB over USB: `g kernel` and `g rpm`, config, driver patch. Needs a stub built with `-DSTUB_EUD` |
+| `tools/ocd/` | JTAG/SWD debugging over USB with Qualcomm EUD: OpenOCD config and driver patch, `g kernel`, `g rpm` |
 | `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy, UART recorder, ramdump capture |
 | `docs/PORT.md` | Engineering notes |
 
 No firmware, dumps or stock binaries are included. You need these from your own device or public sources:
 GPU firmware `a630_sqe.fw` and `a610_zap.*` from `/vendor/firmware` into `firmware/`, and a static aarch64 busybox as
 `build/initramfs/busybox`. The audio topology is built from source. Modem, DSP, Wi-Fi, Bluetooth and sensor files are listed in [docs/PORT.md](docs/PORT.md).
+
+## Debugging over USB (Qualcomm EUD)
+
+EUD (Embedded USB Debug) is built into Snapdragon SoCs and gives SWD and a serial port over the normal USB-C cable, with no
+JTAG probe, UART wiring or opened case. It keeps working when Linux is dead. On this tablet:
+
+- **GDB on the running kernel:** `tools/ocd/g kernel` connects to all 8 cores as threads, with hardware breakpoints,
+  watchpoints, source lines, `lx-dmesg`, `lx-ps` and `$lx_current()`. `tools/ocd/g rpm` does the same for the RPM's Cortex-M3.
+- **Kernel log without a UART:** `tools/eudlog.py` records the console from the first line, `[0.000000] Linux version`, through
+  reboots and up to the last line of a panic. The console is `earlycon=qcom_eud,0x1610000 keep_bootcon`, in the kernel series.
+
+Setup, patches to upstream OpenOCD and limits: [docs/PORT.md](docs/PORT.md#debugging-over-usb-qualcomm-eud-embedded-usb-debug).
 
 ## Building
 
