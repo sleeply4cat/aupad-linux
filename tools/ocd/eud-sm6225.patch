@@ -1,0 +1,311 @@
+diff --git a/src/jtag/drivers/eud.c b/src/jtag/drivers/eud.c
+index 1e1cad788..346c699a7 100644
+--- a/src/jtag/drivers/eud.c
++++ b/src/jtag/drivers/eud.c
+@@ -21,12 +21,14 @@
+ #include "libusb_helper.h"
+ 
+ #define EUD_VID							0x05c6
++#define EUD_HUB_PID						0x9500
+ #define EUD_CTL_PID						0x9501
+ #define EUD_SWD_PID						0x9504
+ #define EUD_INTERFACE					0
+ #define EUD_EP_OUT						0x02
+ #define EUD_EP_IN						0x81
+ #define EUD_USB_TIMEOUT_MS				6000
++#define EUD_WRITE_GAP_US				1000
+ /*
+  * The SWD function exposes 32-byte hardware FIFOs in both directions.
+  * The hardware processes commands in order until any of the following:
+@@ -138,7 +140,11 @@ static struct eud_swd_transfer eud_queue[EUD_SWD_BUFFER_SIZE];
+ static unsigned int eud_queue_len;
+ static unsigned int eud_queue_out_len;
+ static unsigned int eud_queue_in_len;
+-static int eud_speed_index = 0xa;
++/*
++ * 7.5 MHz.  This is used before "adapter speed" applies.  At 938 kHz and below
++ * the SWD endpoint fails bulk transfers with IO errors, seen on SM6225.
++ */
++static int eud_speed_index = 6;
+ 
+ static const unsigned int eud_speed_khz[] = {
+ 	120000,
+@@ -184,15 +190,47 @@ static int eud_libusb_reinit(void)
+ 	return ERROR_OK;
+ }
+ 
++/* Other devices reuse these IDs: only trust functions behind the EUD hub */
++static libusb_device_handle *eud_open_behind_hub(uint16_t pid)
++{
++	libusb_device **list;
++	libusb_device_handle *handle = NULL;
++
++	ssize_t count = libusb_get_device_list(eud_libusb_ctx, &list);
++	if (count < 0)
++		return NULL;
++
++	for (ssize_t i = 0; i < count && !handle; i++) {
++		struct libusb_device_descriptor desc, hub_desc;
++		libusb_device *hub = libusb_get_parent(list[i]);
++
++		if (!hub ||
++			libusb_get_device_descriptor(list[i], &desc) != LIBUSB_SUCCESS ||
++			libusb_get_device_descriptor(hub, &hub_desc) != LIBUSB_SUCCESS)
++			continue;
++
++		if (desc.idVendor == EUD_VID && desc.idProduct == pid &&
++			hub_desc.idVendor == EUD_VID && hub_desc.idProduct == EUD_HUB_PID)
++			if (libusb_open(list[i], &handle) != LIBUSB_SUCCESS)
++				handle = NULL;
++	}
++
++	libusb_free_device_list(list, 1);
++	return handle;
++}
++
+ static int eud_open_inner(uint16_t pid, struct eud_device *dev, bool quiet)
+ {
+-	dev->handle = libusb_open_device_with_vid_pid(eud_libusb_ctx, EUD_VID, pid);
++	dev->handle = eud_open_behind_hub(pid);
+ 	if (!dev->handle) {
+ 		if (!quiet)
+ 			LOG_ERROR("unable to open EUD USB function %04x:%04x", EUD_VID, pid);
+ 		return ERROR_FAIL;
+ 	}
+ 
++	/* A function that just enumerated is not usable until it is configured */
++	libusb_set_configuration(dev->handle, 1);
++
+ 	int ret = libusb_claim_interface(dev->handle, EUD_INTERFACE);
+ 	if (ret != LIBUSB_SUCCESS) {
+ 		if (!quiet)
+@@ -203,6 +241,10 @@ static int eud_open_inner(uint16_t pid, struct eud_device *dev, bool quiet)
+ 
+ 	dev->pid = pid;
+ 	dev->claimed = true;
++
++	/* Endpoints may be left halted by a previous session */
++	libusb_clear_halt(dev->handle, EUD_EP_OUT);
++	libusb_clear_halt(dev->handle, EUD_EP_IN);
+ 	return ERROR_OK;
+ }
+ 
+@@ -255,12 +297,19 @@ static int eud_op(struct eud_device *dev, uint8_t opcode, uint32_t payload)
+ 	buf[0] = opcode;
+ 	h_u32_to_le(&buf[1], payload);
+ 
+-	return eud_bulk_write(dev, buf, sizeof(buf));
++	int retval = eud_bulk_write(dev, buf, sizeof(buf));
++
++	/* A write right after one with no read between fails with an IO error */
++	usleep(EUD_WRITE_GAP_US);
++	return retval;
+ }
+ 
+ static int eud_op_no_payload(struct eud_device *dev, uint8_t opcode)
+ {
+-	return eud_bulk_write(dev, &opcode, sizeof(opcode));
++	int retval = eud_bulk_write(dev, &opcode, sizeof(opcode));
++
++	usleep(EUD_WRITE_GAP_US);
++	return retval;
+ }
+ 
+ static int eud_ctl_enable_swd(void)
+@@ -273,6 +322,13 @@ static int eud_ctl_enable_swd(void)
+ 	if (retval != ERROR_OK)
+ 		goto out;
+ 
++	/* Setting an already set enable does nothing: it has to go low first */
++	retval = eud_op(&eud_ctl, EUD_CTL_CMD_CTLOUT_CLR, EUD_CTL_SWD_PERIPH_EN);
++	if (retval != ERROR_OK)
++		goto out;
++
++	alive_sleep(500);
++
+ 	retval = eud_op(&eud_ctl, EUD_CTL_CMD_CTLOUT_SET, EUD_CTL_SWD_ON_SET);
+ 
+ out:
+@@ -294,8 +350,10 @@ static int eud_open_swd_after_enable(void)
+ 			return retval;
+ 
+ 		retval = eud_open_inner(EUD_SWD_PID, &eud_swd, true);
+-		if (retval == ERROR_OK)
++		if (retval == ERROR_OK) {
++			alive_sleep(200);
+ 			return ERROR_OK;
++		}
+ 	}
+ 
+ 	LOG_ERROR("unable to open EUD USB function %04x:%04x", EUD_VID, EUD_SWD_PID);
+@@ -355,7 +413,9 @@ static int eud_swd_bitbang(uint32_t payload)
+ 	if (retval != ERROR_OK)
+ 		return retval;
+ 
+-	return eud_bulk_read(&eud_swd, in, sizeof(in));
++	retval = eud_bulk_read(&eud_swd, in, sizeof(in));
++	usleep(EUD_WRITE_GAP_US);
++	return retval;
+ }
+ 
+ static int eud_ditms_u16(uint16_t tms, uint16_t count)
+@@ -370,7 +430,12 @@ static int eud_ditms_u16(uint16_t tms, uint16_t count)
+ 
+ static int eud_swd_prepare(void)
+ {
+-	return eud_swd_init_defaults();
++	int retval = eud_swd_init_defaults();
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* Without this the DAP stays in reset unless the config uses SRST */
++	return eud_swd_bitbang(EUD_SWD_BB_RESET_DEFAULT);
+ }
+ 
+ static int eud_ditms_sequence(const uint8_t *seq, unsigned int bit_len)
+@@ -686,12 +751,9 @@ static int eud_init(void)
+ 		return ERROR_FAIL;
+ 	}
+ 
+-	int retval = eud_open_inner(EUD_SWD_PID, &eud_swd, true);
+-	if (retval != ERROR_OK) {
+-		retval = eud_open_swd_after_enable();
+-		if (retval != ERROR_OK)
+-			goto fail;
+-	}
++	int retval = eud_open_swd_after_enable();
++	if (retval != ERROR_OK)
++		goto fail;
+ 
+ 	retval = eud_swd_prepare();
+ 	if (retval != ERROR_OK) {
+diff --git a/src/target/aarch64.c b/src/target/aarch64.c
+index b334a5b18..9726b1220 100644
+--- a/src/target/aarch64.c
++++ b/src/target/aarch64.c
+@@ -557,7 +557,7 @@ static int aarch64_poll_smp(struct target *target, bool smp,
+ 		armv8->sticky_reset = false;
+ 		if (target->state != TARGET_RESET) {
+ 			target->state = TARGET_RESET;
+-			LOG_TARGET_INFO(target, "external reset detected");
++			LOG_TARGET_DEBUG(target, "external reset detected");	/* every power collapse */
+ 			if (armv8->arm.core_cache) {
+ 				register_cache_invalidate(armv8->arm.core_cache);
+ 				register_cache_invalidate(armv8->arm.core_cache->next);
+@@ -3229,6 +3229,60 @@ COMMAND_HANDLER(aarch64_mcrmrc_command)
+ 	return ERROR_OK;
+ }
+ 
++/* mrc above refuses AArch64.  Goes through x0, which debug entry marks dirty, so it comes back on resume. */
++COMMAND_HANDLER(aarch64_mrs_command)
++{
++	if (CMD_ARGC != 5)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	struct target *target = get_current_target(CMD_CTX);
++	if (!target_was_examined(target)) {
++		command_print(CMD, "%s: not yet examined", target_name(target));
++		return ERROR_TARGET_NOT_EXAMINED;
++	}
++	if (target->state != TARGET_HALTED) {
++		command_print(CMD, "Error: [%s] not halted", target_name(target));
++		return ERROR_TARGET_NOT_HALTED;
++	}
++
++	struct arm *arm = target_to_arm(target);
++	if (arm->core_state != ARM_STATE_AARCH64) {
++		command_print(CMD, "%s: not in AArch64 state", target_name(target));
++		return ERROR_FAIL;
++	}
++
++	uint32_t f[5];
++	static const uint32_t limit[5] = { 3, 7, 15, 15, 7 };
++	for (unsigned int i = 0; i < 5; i++) {
++		COMMAND_PARSE_NUMBER(u32, CMD_ARGV[i], f[i]);
++		if (f[i] > limit[i])
++			return ERROR_COMMAND_ARGUMENT_INVALID;
++	}
++	uint32_t sys = f[0] << 14 | f[1] << 11 | f[2] << 7 | f[3] << 3 | f[4];
++
++	struct arm_dpm *dpm = arm->dpm;
++	int retval = dpm->prepare(dpm);
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* EL1 registers can't be read from EL0 */
++	bool el0 = arm->core_mode == ARMV8_64_EL0T;
++	if (el0)
++		armv8_dpm_modeswitch(dpm, ARMV8_64_EL1H);
++
++	uint64_t value = 0;
++	retval = dpm->instr_read_data_r0_64(dpm, ARMV8_MRS(sys, 0), &value);
++
++	if (el0)
++		armv8_dpm_modeswitch(dpm, ARM_MODE_ANY);
++	dpm->finish(dpm);
++	if (retval != ERROR_OK)
++		return retval;
++
++	command_print(CMD, "0x%016" PRIx64, value);
++	return ERROR_OK;
++}
++
+ static const struct command_registration aarch64_exec_command_handlers[] = {
+ 	{
+ 		.name = "cache_info",
+@@ -3265,6 +3319,13 @@ static const struct command_registration aarch64_exec_command_handlers[] = {
+ 		.help = "read coprocessor register",
+ 		.usage = "cpnum op1 CRn CRm op2",
+ 	},
++	{
++		.name = "mrs",
++		.mode = COMMAND_EXEC,
++		.handler = aarch64_mrs_command,
++		.help = "read AArch64 system register",
++		.usage = "op0 op1 CRn CRm op2",
++	},
+ 	{
+ 		.chain = smp_command_handlers,
+ 	},
+diff --git a/src/target/armv8.c b/src/target/armv8.c
+index 88d8eaaf8..ea20a1ef8 100644
+--- a/src/target/armv8.c
++++ b/src/target/armv8.c
+@@ -347,6 +347,15 @@ static int armv8_read_reg(struct armv8_common *armv8, int regnum, uint64_t *regv
+ 		retval = dpm->instr_read_data_r0_64(dpm,
+ 				ARMV8_MRS(SYSTEM_ELR_EL3, 0), &value_64);
+ 		break;
++	case ARMV8_SP_EL0:
++		if (curel < SYSTEM_CUREL_EL1) {
++			LOG_DEBUG("SP_EL0 not accessible in EL%u", curel);
++			retval = ERROR_FAIL;
++			break;
++		}
++		retval = dpm->instr_read_data_r0_64(dpm,
++				ARMV8_MRS(SYSTEM_SP_EL0, 0), &value_64);
++		break;
+ 	case ARMV8_ESR_EL1:
+ 		if (curel < SYSTEM_CUREL_EL1) {
+ 			LOG_DEBUG("ESR_EL1 not accessible in EL%u", curel);
+@@ -1641,6 +1650,9 @@ static const struct {
+ 														NULL},
+ 	{ ARMV8_PAUTH_DMASK, "pauth_dmask", 64, ARM_MODE_ANY, REG_TYPE_UINT64, NULL, "org.gnu.gdb.aarch64.pauth", NULL},
+ 	{ ARMV8_PAUTH_CMASK, "pauth_cmask", 64, ARM_MODE_ANY, REG_TYPE_UINT64, NULL, "org.gnu.gdb.aarch64.pauth", NULL},
++	/* Linux keeps current there, scripts/gdb reads it for $lx_current() */
++	{ ARMV8_SP_EL0, "SP_EL0", 64, ARMV8_64_EL1H, REG_TYPE_UINT64, "banked", "net.sourceforge.openocd.banked",
++														NULL},
+ };
+ 
+ static const struct {
+diff --git a/src/target/armv8.h b/src/target/armv8.h
+index 836528578..5d0f65a1e 100644
+--- a/src/target/armv8.h
++++ b/src/target/armv8.h
+@@ -101,6 +101,7 @@ enum {
+ 	/* Pseudo registers defined by GDB to remove the pauth signature. */
+ 	ARMV8_PAUTH_DMASK = 77,
+ 	ARMV8_PAUTH_CMASK = 78,
++	ARMV8_SP_EL0 = 79,
+ 
+ 	ARMV8_LAST_REG,
+ };

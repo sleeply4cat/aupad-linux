@@ -375,6 +375,19 @@ u64 stub_main(u64 dtb, u64 base, u64 x1, u64 x2, u64 x3)
 #endif
 #endif
 
+#ifdef STUB_EUD
+	/* Same writes as stock eud.ko: EUD is up before the kernel, so a hang can be inspected over USB. */
+	wr(GCC_BASE + 0x1d008, 1);	/* ahb2phy_usb */
+	kv("EUD tcsr", smc_call(0xc2000502UL, 2, 0x3e5018, 1));
+	wr(0x01611014, 1);		/* CSR_EUD_EN */
+	kv("EUD mode_mgr2", smc_call(0xc2000502UL, 2, 0x1612000, 1));
+	kv("EUD en", rd(0x01611014));
+	/* Hold the kernel back until the host has enumerated EUD and connected: 8-16 s otherwise. */
+	t0 = read_cntpct();
+	while (read_cntpct() - t0 < STUB_EUD * 1000000UL * ticks_per_us)
+		;
+#endif
+
 	kimg = (u64)_stub_end;	/* adrp: runtime address */
 	if (be32((u8 *)kimg + 0x38) != 0x41524d64) {	/* "ARMd" */
 		puts("no payload Image, parking\n");

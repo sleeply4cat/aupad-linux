@@ -1,6 +1,6 @@
 # Mainline Linux on the CHUWI AuPad
 
-Mainline Linux 7.3-rc3 and postmarketOS on the CHUWI AuPad tablet: Qualcomm SM6225 ("khaje"), board UNC6851 CW108-WW,
+Mainline Linux 7.3.1 and postmarketOS on the CHUWI AuPad tablet: Qualcomm SM6225 ("khaje"), board UNC6851 CW108-WW,
 10.51" 1200x1920. Upstream has no SM6225 support, so this port builds on `sm6115.dtsi` and overrides what differs.
 
 **Status: bring-up.** It's a working developer port, not an installable release. It boots from UFS with no host
@@ -54,6 +54,7 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
 | `build/` | Boot image, rootfs and test-loop scripts, initramfs, audio topology source and UCM profile, camera config |
+| `tools/ocd/` | OpenOCD and GDB over USB: `g kernel` and `g rpm`, config, driver patch. Needs a stub built with `-DSTUB_EUD` |
 | `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy, UART recorder, ramdump capture |
 | `docs/PORT.md` | Engineering notes |
 
@@ -63,9 +64,8 @@ GPU firmware `a630_sqe.fw` and `a610_zap.*` from `/vendor/firmware` into `firmwa
 
 ## Building
 
-The patches were developed and tested on `mt6735-staging` at `a62a3e8f9` of
-https://gitlab.com/mt6735-mainline/linux.git, a 7.3-rc3 tree. They only touch Qualcomm code, but plain upstream
-7.3-rc3 is untested and may need small fixups.
+The patches apply to upstream Linux v7.3.1 and were tested there. They were first developed on `mt6735-staging` at
+`a62a3e8f9` of https://gitlab.com/mt6735-mainline/linux.git, a 7.3-rc3 tree.
 
 ```sh
 python3 -m venv venv && venv/bin/pip install pyserial pyusb

@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Run OpenOCD commands on the running server (tools/ocd/server): oc 'halt 500' 'reg pc' ...
+Each argument is one command.  Prints the output, exits 1 when a command raises."""
+import socket
+import sys
+
+END = b"\x1a"
+
+
+def run(sock, cmd):
+    sock.sendall(f"if {{[catch {{capture {{{cmd}}}}} r]}} {{return \"ERROR: $r\"}} else {{return $r}}".encode() + END)
+    buf = b""
+    while not buf.endswith(END):
+        d = sock.recv(65536)
+        if not d:
+            sys.exit("server went away")
+        buf += d
+    return buf[:-1].decode(errors="replace")
+
+
+s = socket.create_connection(("127.0.0.1", 6666), timeout=60)
+rc = 0
+for c in sys.argv[1:]:
+    out = run(s, c)
+    if out.strip():
+        print(out.rstrip())
+    rc |= out.startswith("ERROR:")
+sys.exit(rc)

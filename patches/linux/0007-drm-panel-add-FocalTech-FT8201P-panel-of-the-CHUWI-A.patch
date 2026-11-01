@@ -17,7 +17,7 @@ Claude-Session: https://claude.ai/code/session_015ya7egg5XM6dMvKwj1kAyq
  create mode 100644 drivers/gpu/drm/panel/panel-focaltech-ft8201p.c
 
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
-index c0661380b..2cd6d7839 100644
+index cbdf7b8f7..d159a46a1 100644
 --- a/drivers/gpu/drm/panel/Kconfig
 +++ b/drivers/gpu/drm/panel/Kconfig
 @@ -159,6 +159,15 @@ config DRM_PANEL_ELIDA_KD35T133
@@ -37,7 +37,7 @@ index c0661380b..2cd6d7839 100644
  	tristate "Feixin K101 IM2BA02 panel"
  	depends on OF
 diff --git a/drivers/gpu/drm/panel/Makefile b/drivers/gpu/drm/panel/Makefile
-index 25076c58c..3ba516598 100644
+index 3b523cf37..158abf687 100644
 --- a/drivers/gpu/drm/panel/Makefile
 +++ b/drivers/gpu/drm/panel/Makefile
 @@ -19,6 +19,7 @@ obj-$(CONFIG_DRM_PANEL_EDP) += panel-edp.o

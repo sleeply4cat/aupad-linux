@@ -1,0 +1,5 @@
+#!/bin/bash
+# Run OpenOCD for the tablet with extra commands from the arguments; output goes to logs/ocd.log too.
+cd "$(dirname "$0")/../.."
+O=tools/ext/openocd
+exec $O/src/openocd -s $O/tcl -f tools/ocd/khaje.cfg "$@" 2>&1 | tee -a logs/ocd.log

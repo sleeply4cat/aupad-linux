@@ -1,0 +1,33 @@
+#!/bin/bash
+# GDB on the tablet, starting the server if it has to:  g kernel|rpm [gdb args]
+# kernel: all 8 Kryo cores as threads, symbols from build/out/vmlinux.  Turns off deep idle for the session: a
+# collapsed core loses its breakpoints and watchpoints, silently, and Linux clears the slots again on resume.
+# rpm: the Cortex-M3, no symbols.  Don't leave it halted: Linux's power requests start failing, and UFS can die for
+# the rest of the boot.  Every stop of the kernel halts all cores, so UFS timeouts in dmesg are expected under load.
+# Leaving GDB removes its breakpoints and resumes the target.
+cd "$(dirname "$0")/../.."
+what=$1; shift
+venv/bin/python tools/ocd/up >/dev/null || exit 1
+OC=tools/ocd/oc
+SSH="ssh -o ConnectTimeout=5 root@172.16.42.1"
+idle() {
+	$SSH "for c in /sys/devices/system/cpu/cpu[0-7]; do echo $1 > \$c/cpuidle/state1/disable; done"
+}
+common=(-q -iex "set pagination off" -iex "set confirm off" -iex "set debuginfod enabled off" -iex "set remotetimeout 20"
+	-iex "add-auto-load-safe-path $PWD")
+case $what in
+kernel)
+	idle 1 || { echo "can't turn off deep idle, breakpoints wouldn't hold" >&2; exit 1; }
+	trap 'idle 0' EXIT
+	$OC kryo >/dev/null || { echo "can't examine the cores" >&2; exit 1; }
+	gdb-multiarch "${common[@]}" -ex "file build/out/vmlinux" -ex "target extended-remote :3334" "$@"
+	;;
+rpm)
+	exec gdb-multiarch "${common[@]}" -ex "set architecture armv7e-m" -ex "set arm force-mode thumb" \
+		-ex "target extended-remote :3333" "$@"
+	;;
+*)
+	sed -n '2,7p' "$0"
+	exit 2
+	;;
+esac
