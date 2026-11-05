@@ -1,0 +1,47 @@
+From 38be7c930e65355fdaf74edd38d621c24f3d38ae Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:11:30 +0300
+Subject: [PATCH 32/32] arm64: dts: qcom: sm6225: describe EUD COM and the
+ PHY's EUD register
+
+Add the EUD COM port, and the EUD enable register to the HS PHY so it
+leaves EUD's hub alone.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ arch/arm64/boot/dts/qcom/sm6225.dtsi | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6225.dtsi b/arch/arm64/boot/dts/qcom/sm6225.dtsi
+index 586d3b2a3..61fe67c1d 100644
+--- a/arch/arm64/boot/dts/qcom/sm6225.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm6225.dtsi
+@@ -137,7 +137,8 @@ &pil_video_mem {
+ /* khaje replaces the QUSB2 PHY with a SNPS femto (7 nm) HS PHY at the same address. */
+ &usb_hsphy {
+ 	compatible = "qcom,sm6225-usb-hs-phy", "qcom,usb-snps-hs-7nm-phy";
+-	reg = <0x0 0x01613000 0x0 0x110>;
++	reg = <0x0 0x01613000 0x0 0x110>,
++	      <0x0 0x01612000 0x0 0x4>;
+ 	clocks = <&rpmcc RPM_SMD_XO_CLK_SRC>;
+ 	clock-names = "ref";
+ 	resets = <&gcc GCC_QUSB2PHY_PRIM_BCR>;
+@@ -242,6 +243,14 @@ lpass_tx_swr_data: tx-swr-data-state {
+ };
+ 
+ &soc {
++	/* COM peripheral of the Embedded USB Debugger, usable once a bootloader enables EUD */
++	serial@1610000 {
++		compatible = "qcom,sm6225-eud-com", "qcom,eud-com";
++		reg = <0x0 0x01610000 0x0 0x1000>;
++		interrupts = <GIC_SPI 189 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&gcc GCC_AHB2PHY_USB_CLK>;
++	};
++
+ 	sram@c100000 {
+ 		compatible = "mmio-sram";
+ 		reg = <0x0 0x0c100000 0x0 0x28000>;
+-- 
+2.43.0
+

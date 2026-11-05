@@ -1,0 +1,42 @@
+From f55c0bbd8b6c5bac7b22128c53bbcad8797e2807 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:12:13 +0300
+Subject: [PATCH 5/9] serial: keep going when SERIAL_PROBE_ALL can't probe a
+ port
+
+One serial port that fails to probe stopped U-Boot with no console at
+all, before the environment could pick a working one. Warn about the
+port and go on. On SM6225 the Bluetooth UART fails, its pinctrl state
+names a function the pinctrl driver doesn't know.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ drivers/serial/serial-uclass.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/serial/serial-uclass.c b/drivers/serial/serial-uclass.c
+index 9be2ad27..7ba4711d 100644
+--- a/drivers/serial/serial-uclass.c
++++ b/drivers/serial/serial-uclass.c
+@@ -233,11 +233,14 @@ int serial_initialize(void)
+ {
+ 	/* Scanning uclass to probe devices */
+ 	if (IS_ENABLED(CONFIG_SERIAL_PROBE_ALL)) {
++		struct udevice *dev;
+ 		int ret;
+ 
+-		ret  = uclass_probe_all(UCLASS_SERIAL);
+-		if (ret)
+-			return ret;
++		/* A port that fails to probe is no reason to stop with no console at all */
++		for (ret = uclass_first_device_check(UCLASS_SERIAL, &dev); dev;
++		     ret = uclass_next_device_check(&dev))
++			if (ret)
++				printf("%s: probe failed: %d\n", dev->name, ret);
+ 	}
+ 
+ 	return serial_init();
+-- 
+2.43.0
+

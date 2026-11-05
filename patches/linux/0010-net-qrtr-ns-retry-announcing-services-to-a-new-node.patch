@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 97191b0f15791037273384ffec6b8b9ec1528898 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 00:44:24 +0300
-Subject: [PATCH 10/27] net: qrtr: ns: retry announcing services to a new node
+Subject: [PATCH 10/32] net: qrtr: ns: retry announcing services to a new node
 
 qrtr_node_enqueue() refuses everything but HELLO until our own HELLO has
 gone out, and that one is sent from delayed work. If the remote's HELLO

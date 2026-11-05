@@ -1,0 +1,118 @@
+From 2813d9292771238292ea649edb98a0e216f813fc Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:11:30 +0300
+Subject: [PATCH 29/32] phy: qcom: snps-femto-v2: leave the PHY alone while EUD
+ is enabled
+
+With the Embedded USB Debugger on, the PHY carries the EUD hub and its
+debug functions. init asserted the PHY reset and reprogrammed it, which
+disconnected the debugger about one boot in three on SM6225 and lost
+the EUD console's output for a few seconds.
+
+Do what Qualcomm's own driver does: while the EUD enable register reads
+1, init only takes the regulator and clock votes, and exit keeps them,
+so the PHY stays powered as EUD set it up.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c | 34 +++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c b/drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c
+index 980ad1fb1..e9182e746 100644
+--- a/drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c
++++ b/drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c
+@@ -113,6 +113,7 @@ struct phy_override_seq {
+  *
+  * @phy: generic phy
+  * @base: iomapped memory space for snps hs phy
++ * @eud_en: EUD enable register, optional
+  *
+  * @num_clks: number of clocks
+  * @clks: array of clocks
+@@ -127,6 +128,7 @@ struct qcom_snps_hsphy {
+ 
+ 	struct phy *phy;
+ 	void __iomem *base;
++	void __iomem *eud_en;
+ 
+ 	int num_clks;
+ 	struct clk_bulk_data *clks;
+@@ -383,6 +385,16 @@ static const struct override_param_map sc7280_snps_7nm_phy[] = {
+ 	{},
+ };
+ 
++/*
++ * With the Embedded USB Debugger on, the PHY carries the EUD hub and its debug
++ * functions.  Resetting or reprogramming it disconnects the debugger, so leave
++ * it as the EUD set it up, and keep it powered.
++ */
++static bool qcom_snps_hsphy_eud_on(struct qcom_snps_hsphy *hsphy)
++{
++	return hsphy->eud_en && (readl(hsphy->eud_en) & BIT(0));
++}
++
+ static int qcom_snps_hsphy_init(struct phy *phy)
+ {
+ 	struct qcom_snps_hsphy *hsphy = phy_get_drvdata(phy);
+@@ -390,6 +402,10 @@ static int qcom_snps_hsphy_init(struct phy *phy)
+ 
+ 	dev_vdbg(&phy->dev, "%s(): Initializing SNPS HS phy\n", __func__);
+ 
++	/* Still powered from before an exit with the EUD on */
++	if (hsphy->phy_initialized)
++		return 0;
++
+ 	ret = regulator_bulk_enable(ARRAY_SIZE(hsphy->vregs), hsphy->vregs);
+ 	if (ret)
+ 		return ret;
+@@ -400,6 +416,12 @@ static int qcom_snps_hsphy_init(struct phy *phy)
+ 		goto poweroff_phy;
+ 	}
+ 
++	if (qcom_snps_hsphy_eud_on(hsphy)) {
++		dev_info(&phy->dev, "EUD is enabled, leaving the PHY to it\n");
++		hsphy->phy_initialized = true;
++		return 0;
++	}
++
+ 	ret = reset_control_assert(hsphy->phy_reset);
+ 	if (ret) {
+ 		dev_err(&phy->dev, "failed to assert phy_reset, %d\n", ret);
+@@ -480,6 +502,9 @@ static int qcom_snps_hsphy_exit(struct phy *phy)
+ {
+ 	struct qcom_snps_hsphy *hsphy = phy_get_drvdata(phy);
+ 
++	if (qcom_snps_hsphy_eud_on(hsphy))
++		return 0;
++
+ 	reset_control_assert(hsphy->phy_reset);
+ 	clk_bulk_disable_unprepare(hsphy->num_clks, hsphy->clks);
+ 	regulator_bulk_disable(ARRAY_SIZE(hsphy->vregs), hsphy->vregs);
+@@ -567,6 +592,7 @@ static int qcom_snps_hsphy_probe(struct platform_device *pdev)
+ 	struct qcom_snps_hsphy *hsphy;
+ 	struct phy_provider *phy_provider;
+ 	struct phy *generic_phy;
++	struct resource *res;
+ 	int ret, i;
+ 	int num;
+ 
+@@ -580,6 +606,14 @@ static int qcom_snps_hsphy_probe(struct platform_device *pdev)
+ 	if (IS_ERR(hsphy->base))
+ 		return PTR_ERR(hsphy->base);
+ 
++	/* Not requested: the EUD driver owns this register */
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++	if (res) {
++		hsphy->eud_en = devm_ioremap(dev, res->start, resource_size(res));
++		if (!hsphy->eud_en)
++			return -ENOMEM;
++	}
++
+ 	ret = qcom_snps_hsphy_clk_init(hsphy);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "failed to initialize clocks\n");
+-- 
+2.43.0
+

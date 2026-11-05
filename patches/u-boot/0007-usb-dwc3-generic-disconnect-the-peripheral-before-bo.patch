@@ -1,0 +1,34 @@
+From b104bdc219fdd13fcf33703a11f989072a4265ec Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:12:13 +0300
+Subject: [PATCH 7/9] usb: dwc3: generic: disconnect the peripheral before
+ booting the OS
+
+"fastboot boot" starts the next image from inside the gadget loop, so
+the code that unregisters the gadget never runs and the controller
+stays connected with nobody behind it. Behind the Embedded USB
+Debugger's hub that stalled the host's hub driver for 20 s. Mark the
+peripheral DM_FLAG_OS_PREPARE so bootm removes it first.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ drivers/usb/dwc3/dwc3-generic.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/usb/dwc3/dwc3-generic.c b/drivers/usb/dwc3/dwc3-generic.c
+index 2406f844..3a8c114f 100644
+--- a/drivers/usb/dwc3/dwc3-generic.c
++++ b/drivers/usb/dwc3/dwc3-generic.c
+@@ -249,6 +249,8 @@ U_BOOT_DRIVER(dwc3_generic_peripheral) = {
+ 	.remove = dwc3_generic_peripheral_remove,
+ 	.priv_auto	= sizeof(struct dwc3_generic_priv),
+ 	.plat_auto	= sizeof(struct dwc3_generic_plat),
++	/* "fastboot boot" starts the OS from the gadget loop: disconnect before handing over */
++	.flags	= DM_FLAG_OS_PREPARE,
+ };
+ #endif
+ 
+-- 
+2.43.0
+

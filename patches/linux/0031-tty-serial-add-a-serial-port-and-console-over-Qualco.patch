@@ -1,0 +1,501 @@
+From cc92ad3a4c7f78c5dcbc2d42d10d4750185ab706 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:11:30 +0300
+Subject: [PATCH 31/32] tty: serial: add a serial port and console over
+ Qualcomm EUD COM
+
+/dev/ttyEUD0 and console=ttyEUD0 over the COM function of the Embedded
+USB Debugger, both ways, so a shell and the kernel log need neither the
+UART nor the kernel's USB stack.
+
+RX as measured on SM6225: a host packet is one transfer of exactly
+2 + length bytes and stays pending until RX_DAT has been read length
+times. Further transfers fail while it's pending, and one that collides
+with a packet being read can shorten or drop it, so the host sends one
+packet at a time and waits for an acknowledgment, a 1-byte packet with
+ID 0x91 sent once a packet has been read.
+
+The EUD interrupt never reaches the GIC on SM6225, so the port is
+polled while open: every jiffy for half a second after traffic, every
+20 ms otherwise. Pending packets wait in the hardware, so nothing is
+lost. The block is mapped non-posted, as the boot console's is.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ drivers/tty/serial/Kconfig           |  11 +
+ drivers/tty/serial/Makefile          |   1 +
+ drivers/tty/serial/qcom_eud_serial.c | 427 +++++++++++++++++++++++++++
+ 3 files changed, 439 insertions(+)
+ create mode 100644 drivers/tty/serial/qcom_eud_serial.c
+
+diff --git a/drivers/tty/serial/Kconfig b/drivers/tty/serial/Kconfig
+index ca17a4062..6c3343dcc 100644
+--- a/drivers/tty/serial/Kconfig
++++ b/drivers/tty/serial/Kconfig
+@@ -921,6 +921,17 @@ config SERIAL_QCOM_EUD_EARLYCON
+ 	  USB Debug, with earlycon=qcom_eud,<address>. EUD has to be enabled
+ 	  before the kernel starts. Add keep_bootcon to keep it after boot.
+ 
++config SERIAL_QCOM_EUD
++	bool "Serial port and console over Qualcomm EUD COM"
++	depends on ARM64 && (ARCH_QCOM || COMPILE_TEST)
++	select SERIAL_CORE
++	select SERIAL_CORE_CONSOLE
++	help
++	  /dev/ttyEUD0 over the COM peripheral of Qualcomm's Embedded USB
++	  Debug, with console=ttyEUD0. EUD has to be enabled before the kernel
++	  starts. The host sends one packet at a time and waits for an
++	  acknowledgment.
++
+ config SERIAL_QCOM_GENI
+ 	tristate "Qualcomm on-chip GENI based serial port support"
+ 	depends on ARCH_QCOM || COMPILE_TEST
+diff --git a/drivers/tty/serial/Makefile b/drivers/tty/serial/Makefile
+index b1e783beb..ed467ddf0 100644
+--- a/drivers/tty/serial/Makefile
++++ b/drivers/tty/serial/Makefile
+@@ -66,6 +66,7 @@ obj-$(CONFIG_SERIAL_PIC32)		+= pic32_uart.o
+ obj-$(CONFIG_SERIAL_PXA_NON8250)	+= pxa.o
+ obj-$(CONFIG_SERIAL_PMACZILOG)		+= pmac_zilog.o
+ obj-$(CONFIG_SERIAL_QCOM_EUD_EARLYCON) += qcom_eud_earlycon.o
++obj-$(CONFIG_SERIAL_QCOM_EUD)		+= qcom_eud_serial.o
+ obj-$(CONFIG_SERIAL_QCOM_GENI)		+= qcom_geni_serial.o
+ obj-$(CONFIG_SERIAL_QE)			+= ucc_uart.o
+ obj-$(CONFIG_SERIAL_RDA)		+= rda-uart.o
+diff --git a/drivers/tty/serial/qcom_eud_serial.c b/drivers/tty/serial/qcom_eud_serial.c
+new file mode 100644
+index 000000000..5d0e85da0
+--- /dev/null
++++ b/drivers/tty/serial/qcom_eud_serial.c
+@@ -0,0 +1,427 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Serial port and console over the COM peripheral of Qualcomm's Embedded USB Debug (EUD), as
++ * /dev/ttyEUD0.
++ *
++ * EUD sits between the USB connector and the PHY and shows the host a hub with debug functions,
++ * COM among them. Whoever enables EUD (a bootloader or stub) also makes this port usable. It
++ * doesn't depend on the kernel's USB stack.
++ *
++ * A COM packet is an ID byte, a length and up to 14 bytes, both ways.
++ *
++ * TX: write the ID, the length and then the bytes; the packet goes out when the last byte is
++ * written.
++ *
++ * RX: the host sends a packet as one USB transfer of exactly 2 + length bytes. The RX status stays
++ * up until RX_DAT has been read length times. While a packet is pending the hardware fails every
++ * further OUT transfer, and a transfer that collides with one being read can shorten or drop it.
++ * So the host sends one packet at a time and waits for an acknowledgment, a 1-byte packet with ID
++ * EUD_COM_ACK_ID, sent here once a packet has been read.
++ *
++ * The EUD interrupt (SPI 189 in Qualcomm's device tree) never reaches the GIC on SM6225, whatever
++ * the enable registers hold, so the port is polled while it's open. A packet waits in the
++ * hardware until it's read and the host sends nothing else meanwhile, so polling loses nothing.
++ */
++
++#include <linux/bits.h>
++#include <linux/clk.h>
++#include <linux/console.h>
++#include <linux/jiffies.h>
++#include <linux/io.h>
++#include <linux/minmax.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/serial_core.h>
++#include <linux/tty.h>
++#include <linux/timer.h>
++#include <linux/tty_flip.h>
++
++#define EUD_COM_TX_ID		0x00
++#define EUD_COM_TX_LEN		0x04
++#define EUD_COM_TX_DAT		0x08
++#define EUD_COM_RX_ID		0x0c
++#define EUD_COM_RX_LEN		0x10
++#define EUD_COM_RX_DAT		0x14
++#define EUD_INT_STATUS		0x44
++#define EUD_INT_RX		BIT(0)
++#define EUD_INT_TX		BIT(1)
++#define EUD_CTL_OUT		0x70	/* mirrors the host's control register */
++#define EUD_CTL_COM_EN		BIT(5)
++
++#define EUD_COM_PACKET_ID	0x90
++#define EUD_COM_ACK_ID		0x91
++#define EUD_COM_PACKET_MAX	14
++#define EUD_COM_TX_POLLS	100000
++#define EUD_POLL_IDLE_MS	20
++#define EUD_POLL_BUSY_MS	500	/* poll every jiffy for this long after traffic */
++
++struct eud_com {
++	struct uart_port port;
++	struct clk *clk;
++	struct timer_list poll;
++	unsigned long busy_until;
++	bool ack_pending;
++	bool stalled;
++};
++
++static struct eud_com *eud_com_console_port;
++
++static struct eud_com *to_eud(struct uart_port *port)
++{
++	return container_of(port, struct eud_com, port);
++}
++
++static u32 eud_read(struct uart_port *port, unsigned int reg)
++{
++	return readl(port->membase + reg) & 0xff;
++}
++
++static void eud_write(struct uart_port *port, unsigned int reg, u32 val)
++{
++	writel(val, port->membase + reg);
++}
++
++/* No host: nothing would ever drain a packet. */
++static bool eud_host_present(struct uart_port *port)
++{
++	return eud_read(port, EUD_CTL_OUT) & EUD_CTL_COM_EN;
++}
++
++static bool eud_tx_ready(struct uart_port *port)
++{
++	return eud_read(port, EUD_INT_STATUS) & EUD_INT_TX;
++}
++
++static void eud_send(struct uart_port *port, u8 id, const u8 *buf, unsigned int len)
++{
++	unsigned int i;
++
++	eud_write(port, EUD_COM_TX_ID, id);
++	eud_write(port, EUD_COM_TX_LEN, len);
++	for (i = 0; i < len; i++)
++		eud_write(port, EUD_COM_TX_DAT, buf[i]);
++}
++
++/* Port locked: send what's queued while the hardware takes it, the poll does the rest. */
++static void eud_tx_chars(struct uart_port *port)
++{
++	struct eud_com *eud = to_eud(port);
++	struct tty_port *tport = &port->state->port;
++	u8 buf[EUD_COM_PACKET_MAX];
++	unsigned int len;
++
++	while (eud->ack_pending || !kfifo_is_empty(&tport->xmit_fifo)) {
++		if (!eud_host_present(port)) {
++			eud->ack_pending = false;
++			uart_xmit_advance(port, kfifo_len(&tport->xmit_fifo));
++			break;
++		}
++		if (!eud_tx_ready(port))
++			return;
++		if (eud->ack_pending) {
++			eud_send(port, EUD_COM_ACK_ID, (const u8 []){ 0x06 }, 1);
++			eud->ack_pending = false;
++			continue;
++		}
++		if (uart_tx_stopped(port))
++			break;
++		for (len = 0; len < EUD_COM_PACKET_MAX && uart_fifo_get(port, &buf[len]); len++)
++			;
++		eud_send(port, EUD_COM_PACKET_ID, buf, len);
++	}
++
++	if (kfifo_len(&tport->xmit_fifo) < WAKEUP_CHARS)
++		uart_write_wakeup(port);
++}
++
++static void eud_rx_chars(struct uart_port *port)
++{
++	unsigned int id, len, i;
++
++	id = eud_read(port, EUD_COM_RX_ID);
++	len = eud_read(port, EUD_COM_RX_LEN);
++	/* Reading all of it is what releases the packet, whatever is in it */
++	for (i = 0; i < len; i++) {
++		u8 ch = eud_read(port, EUD_COM_RX_DAT);
++
++		if (id != EUD_COM_PACKET_ID)
++			continue;
++		port->icount.rx++;
++		if (!uart_prepare_sysrq_char(port, ch))
++			uart_insert_char(port, 0, 0, ch, TTY_NORMAL);
++	}
++
++	to_eud(port)->ack_pending = true;
++	eud_tx_chars(port);
++}
++
++static void eud_com_poll(struct timer_list *t)
++{
++	struct eud_com *eud = timer_container_of(eud, t, poll);
++	struct uart_port *port = &eud->port;
++	unsigned long flags;
++	bool rx;
++
++	uart_port_lock_irqsave(port, &flags);
++	rx = eud_read(port, EUD_INT_STATUS) & EUD_INT_RX;
++	if (rx)
++		eud_rx_chars(port);
++	else
++		eud_tx_chars(port);
++	if (rx || !kfifo_is_empty(&port->state->port.xmit_fifo))
++		eud->busy_until = jiffies + msecs_to_jiffies(EUD_POLL_BUSY_MS);
++	uart_unlock_and_check_sysrq_irqrestore(port, flags);
++
++	if (rx)
++		tty_flip_buffer_push(&port->state->port);
++
++	mod_timer(&eud->poll, jiffies + (time_before(jiffies, eud->busy_until) ? 1 :
++					 msecs_to_jiffies(EUD_POLL_IDLE_MS)));
++}
++
++static unsigned int eud_tx_empty(struct uart_port *port)
++{
++	return eud_tx_ready(port) ? TIOCSER_TEMT : 0;
++}
++
++static void eud_set_mctrl(struct uart_port *port, unsigned int mctrl)
++{
++}
++
++static unsigned int eud_get_mctrl(struct uart_port *port)
++{
++	return TIOCM_CAR | TIOCM_CTS | TIOCM_DSR;
++}
++
++static void eud_stop_tx(struct uart_port *port)
++{
++}
++
++static void eud_start_tx(struct uart_port *port)
++{
++	struct eud_com *eud = to_eud(port);
++
++	eud_tx_chars(port);
++	eud->busy_until = jiffies + msecs_to_jiffies(EUD_POLL_BUSY_MS);
++	mod_timer(&eud->poll, jiffies + 1);
++}
++
++static void eud_stop_rx(struct uart_port *port)
++{
++}
++
++static int eud_startup(struct uart_port *port)
++{
++	mod_timer(&to_eud(port)->poll, jiffies + 1);
++	return 0;
++}
++
++static void eud_shutdown(struct uart_port *port)
++{
++	timer_delete_sync(&to_eud(port)->poll);
++}
++
++static void eud_set_termios(struct uart_port *port, struct ktermios *termios,
++			    const struct ktermios *old)
++{
++	/* No line settings: it's a USB pipe */
++	tty_termios_copy_hw(termios, old ? old : &tty_std_termios);
++}
++
++static const char *eud_type(struct uart_port *port)
++{
++	return "EUD COM";
++}
++
++static void eud_release_port(struct uart_port *port)
++{
++}
++
++static int eud_request_port(struct uart_port *port)
++{
++	return 0;
++}
++
++static void eud_config_port(struct uart_port *port, int flags)
++{
++	port->type = PORT_GENERIC;
++}
++
++static int eud_verify_port(struct uart_port *port, struct serial_struct *ser)
++{
++	return ser->type == PORT_UNKNOWN || ser->type == PORT_GENERIC ? 0 : -EINVAL;
++}
++
++static const struct uart_ops eud_com_ops = {
++	.tx_empty	= eud_tx_empty,
++	.set_mctrl	= eud_set_mctrl,
++	.get_mctrl	= eud_get_mctrl,
++	.stop_tx	= eud_stop_tx,
++	.start_tx	= eud_start_tx,
++	.stop_rx	= eud_stop_rx,
++	.startup	= eud_startup,
++	.shutdown	= eud_shutdown,
++	.set_termios	= eud_set_termios,
++	.type		= eud_type,
++	.release_port	= eud_release_port,
++	.request_port	= eud_request_port,
++	.config_port	= eud_config_port,
++	.verify_port	= eud_verify_port,
++};
++
++static void eud_console_write(struct console *co, const char *s, unsigned int n)
++{
++	struct eud_com *eud = eud_com_console_port;
++	struct uart_port *port = &eud->port;
++	unsigned long flags;
++	bool locked = true;
++
++	if (oops_in_progress)
++		locked = uart_port_trylock_irqsave(port, &flags);
++	else
++		uart_port_lock_irqsave(port, &flags);
++
++	while (n && eud_host_present(port)) {
++		unsigned int len = min(n, EUD_COM_PACKET_MAX);
++		unsigned int polls = eud->stalled ? 1 : EUD_COM_TX_POLLS;
++
++		while (polls && !eud_tx_ready(port))
++			polls--;
++		/* Host stopped reading: drop output, don't spin on every line meanwhile */
++		eud->stalled = !polls;
++		if (eud->stalled)
++			break;
++
++		eud_send(port, EUD_COM_PACKET_ID, s, len);
++		s += len;
++		n -= len;
++	}
++
++	if (locked)
++		uart_port_unlock_irqrestore(port, flags);
++}
++
++static int eud_console_setup(struct console *co, char *options)
++{
++	return eud_com_console_port ? 0 : -ENODEV;
++}
++
++static struct uart_driver eud_com_driver;
++
++static struct console eud_console = {
++	.name		= "ttyEUD",
++	.write		= eud_console_write,
++	.device		= uart_console_device,
++	.setup		= eud_console_setup,
++	.flags		= CON_PRINTBUFFER,
++	.index		= -1,
++	.data		= &eud_com_driver,
++};
++
++static struct uart_driver eud_com_driver = {
++	.owner		= THIS_MODULE,
++	.driver_name	= "qcom-eud-com",
++	.dev_name	= "ttyEUD",
++	.nr		= 1,
++	.cons		= &eud_console,
++};
++
++static void eud_com_unmap(void *base)
++{
++	iounmap(base);
++}
++
++static int eud_com_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct uart_port *port;
++	struct resource *res;
++	struct eud_com *eud;
++	int ret;
++
++	eud = devm_kzalloc(dev, sizeof(*eud), GFP_KERNEL);
++	if (!eud)
++		return -ENOMEM;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res)
++		return -EINVAL;
++	port = &eud->port;
++	/* Posted writes lose about 1 packet in 1000 */
++	port->membase = ioremap_np(res->start, resource_size(res));
++	if (!port->membase)
++		return -ENOMEM;
++	ret = devm_add_action_or_reset(dev, eud_com_unmap, port->membase);
++	if (ret)
++		return ret;
++	port->mapbase = res->start;
++
++	eud->clk = devm_clk_get_optional_enabled(dev, NULL);
++	if (IS_ERR(eud->clk))
++		return dev_err_probe(dev, PTR_ERR(eud->clk), "failed to enable clock\n");
++
++	port->dev = dev;
++	port->type = PORT_GENERIC;
++	port->iotype = UPIO_MEM32;
++	port->fifosize = EUD_COM_PACKET_MAX;
++	port->ops = &eud_com_ops;
++	port->flags = UPF_BOOT_AUTOCONF;
++	port->has_sysrq = IS_ENABLED(CONFIG_SERIAL_QCOM_EUD);
++	timer_setup(&eud->poll, eud_com_poll, 0);
++	platform_set_drvdata(pdev, eud);
++
++	eud_com_console_port = eud;
++	ret = uart_add_one_port(&eud_com_driver, port);
++	if (ret)
++		eud_com_console_port = NULL;
++	return ret;
++}
++
++static void eud_com_remove(struct platform_device *pdev)
++{
++	struct eud_com *eud = platform_get_drvdata(pdev);
++
++	uart_remove_one_port(&eud_com_driver, &eud->port);
++	eud_com_console_port = NULL;
++}
++
++static const struct of_device_id eud_com_of_match[] = {
++	{ .compatible = "qcom,eud-com" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, eud_com_of_match);
++
++static struct platform_driver eud_com_platform_driver = {
++	.probe	= eud_com_probe,
++	.remove	= eud_com_remove,
++	.driver	= {
++		.name		= "qcom-eud-com",
++		.of_match_table	= eud_com_of_match,
++	},
++};
++
++static int __init eud_com_init(void)
++{
++	int ret;
++
++	ret = uart_register_driver(&eud_com_driver);
++	if (ret)
++		return ret;
++
++	ret = platform_driver_register(&eud_com_platform_driver);
++	if (ret)
++		uart_unregister_driver(&eud_com_driver);
++	return ret;
++}
++module_init(eud_com_init);
++
++static void __exit eud_com_exit(void)
++{
++	platform_driver_unregister(&eud_com_platform_driver);
++	uart_unregister_driver(&eud_com_driver);
++}
++module_exit(eud_com_exit);
++
++MODULE_DESCRIPTION("Serial port and console over Qualcomm EUD COM");
++MODULE_LICENSE("GPL");
+-- 
+2.43.0
+

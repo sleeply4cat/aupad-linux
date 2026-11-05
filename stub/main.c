@@ -286,6 +286,9 @@ u64 stub_main(u64 dtb, u64 base, u64 x1, u64 x2, u64 x3)
 {
 	u32 vote, i;
 	u64 kimg, ksize, dst, t0, t_entry = read_cntpct(), cpuon;
+#ifdef STUB_EUD
+	u32 eud_was_on;
+#endif
 
 	stage(2);
 	ticks_per_us = read_cntfrq() / 1000000;
@@ -378,20 +381,42 @@ u64 stub_main(u64 dtb, u64 base, u64 x1, u64 x2, u64 x3)
 #ifdef STUB_EUD
 	/* Same writes as stock eud.ko: EUD is up before the kernel, so a hang can be inspected over USB. */
 	wr(GCC_BASE + 0x1d008, 1);	/* ahb2phy_usb */
+	eud_was_on = rd(0x01611014) & 1;
+#ifdef STUB_USB_OFF
+	/*
+	 * A U-Boot without the dwc3 OS_PREPARE fix starts us from "fastboot boot" with its gadget still connected.  The
+	 * dead gadget then sits on the EUD hub and the host's hub driver stalls on it for 20 s, keeping the COM and SWD
+	 * functions from enumerating.  Soft-disconnect it, only while the controller's master clock runs.  Not needed
+	 * once recovery_b holds the fixed U-Boot.
+	 */
+	if (!(rd(GCC_BASE + 0x1a010) >> 31)) {
+		wr(0x04e0c704, rd(0x04e0c704) & ~(1u << 31));	/* DCTL.RUN_STOP */
+		kv("USB gadget stopped, DCTL", rd(0x04e0c704));
+	}
+#endif
 	kv("EUD tcsr", smc_call(0xc2000502UL, 2, 0x3e5018, 1));
 	wr(0x01611014, 1);		/* CSR_EUD_EN */
 	kv("EUD mode_mgr2", smc_call(0xc2000502UL, 2, 0x1612000, 1));
 	kv("EUD en", rd(0x01611014));
 	/*
-	 * Hold the kernel back until the host has enumerated EUD and connected: 8-16 s otherwise.  COM_EN in CTL_OUT
-	 * means tools/eudlog.py is there: release, after the time it takes to open the function that just appeared.
+	 * Hold the next stage back until the host reads the console: 8-16 s after EUD comes up.  COM_EN in CTL_OUT
+	 * survives a warm reset, so wait for tools/eudlog.py's hello instead, a COM packet it sends once it has the
+	 * function open.  Read it, which releases it, and acknowledge it like the console drivers do.  Already on
+	 * means an earlier stage did this.
 	 */
 	t0 = read_cntpct();
-	while (read_cntpct() - t0 < STUB_EUD * 1000000UL * ticks_per_us)
-		if (rd(0x01610070) & (1 << 5)) {
-			t0 = read_cntpct();
-			while (read_cntpct() - t0 < 1500000UL * ticks_per_us)
+	while (!eud_was_on && read_cntpct() - t0 < STUB_EUD * 1000000UL * ticks_per_us)
+		if (rd(0x01610044) & 1) {	/* RX pending */
+			u32 n = rd(0x01610010) & 0xff;
+
+			while (n--)
+				rd(0x01610014);
+			while (!(rd(0x01610044) & 2))
 				;
+			wr(0x01610000, 0x91);	/* ack: ID, length, byte */
+			wr(0x01610004, 1);
+			wr(0x01610008, 6);
+			puts("EUD host connected\n");
 			break;
 		}
 #endif

@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From eb372c255e42d0a925bdf2f271d6b2a015099086 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Fri, 30 Oct 2026 22:04:34 +0300
-Subject: [PATCH 03/27] clk: qcom: add SM6225 GCC, dispcc and gpucc drivers
+Subject: [PATCH 03/32] clk: qcom: add SM6225 GCC, dispcc and gpucc drivers
 
 khaje PLLs are Lucid and Zonda, so the SM6115 drivers read them wrongly, and
 its dispcc layout matches SM6375 rather than SM6115. Generated from the GPL-2.0

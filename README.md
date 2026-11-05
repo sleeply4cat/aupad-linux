@@ -40,7 +40,7 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 | Suspend | Partial | Works only with workarounds, no whole-chip sleep, USB lost on resume. Disabled |
 | Rear camera | Partial | OV13B10 through CAMSS and libcamera, works in Snapshot. Fixed focus in apps, no gain control, crops in portrait. Megapixels has controls but its preview blinks |
 | Front camera | Not working | GC5035 not detected, ribbon on the dev tablet unchecked |
-| Debugging | Works | Qualcomm EUD over USB-C: OpenOCD and GDB, kernel log without a UART |
+| Debugging | Works | Qualcomm EUD over USB-C: OpenOCD and GDB, two-way U-Boot and kernel console without a UART |
 | USB3, packaging for pmaports | Not started | |
 
 Known gaps: a boot can freeze the whole SoC, and the kernel on disk then needs a host to recover, see "Boot hang" in the docs. The GPU doesn't vote the MX rail, so 1260 MHz is tested rather than guaranteed. The LP6280S display bias chip
@@ -51,7 +51,7 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 | Path | Contents |
 |---|---|
 | `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, camera, battery, device tree |
-| `patches/u-boot/` | U-Boot series: UFS on SM6225, boot environment |
+| `patches/u-boot/` | U-Boot series: UFS on SM6225, EUD console, current-DT fixes, boot environment |
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
 | `build/` | Boot image, rootfs and test-loop scripts, initramfs, audio topology source and UCM profile, camera config |

@@ -1,0 +1,226 @@
+From 94500538c1ea4d7f6ee0020867632fc7a08c4e0b Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:12:13 +0300
+Subject: [PATCH 8/9] serial: add a console over Qualcomm EUD COM
+
+The COM function of the Embedded USB Debugger as a serial device, for a
+console with neither the UART nor USB in U-Boot. Same protocol as the
+Linux driver: whole packets read at once, each acknowledged with a
+1-byte packet of ID 0x91 so the host sends the next one; output is
+dropped while no host reads.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ drivers/serial/Kconfig           |   8 ++
+ drivers/serial/Makefile          |   1 +
+ drivers/serial/serial_qcom_eud.c | 166 +++++++++++++++++++++++++++++++
+ 3 files changed, 175 insertions(+)
+ create mode 100644 drivers/serial/serial_qcom_eud.c
+
+diff --git a/drivers/serial/Kconfig b/drivers/serial/Kconfig
+index bcb0c865..6d387336 100644
+--- a/drivers/serial/Kconfig
++++ b/drivers/serial/Kconfig
+@@ -1018,6 +1018,14 @@ config MSM_SERIAL
+ 	  for example APQ8016 and MSM8916.
+ 	  Single baudrate is supported in current implementation (115200).
+ 
++config SERIAL_QCOM_EUD
++	bool "Console over Qualcomm EUD COM"
++	depends on DM_SERIAL && ARCH_SNAPDRAGON
++	help
++	  Console over the COM peripheral of Qualcomm's Embedded USB Debug,
++	  for a host program that sends one packet at a time and waits for
++	  an acknowledgment. EUD has to be enabled before U-Boot runs.
++
+ config MSM_GENI_SERIAL
+ 	bool "Qualcomm on-chip GENI UART"
+ 	depends on QCOM_GENI
+diff --git a/drivers/serial/Makefile b/drivers/serial/Makefile
+index 44fb2170..8990131e 100644
+--- a/drivers/serial/Makefile
++++ b/drivers/serial/Makefile
+@@ -45,6 +45,7 @@ obj-$(CONFIG_BCM283X_MU_SERIAL) += serial_bcm283x_mu.o
+ obj-$(CONFIG_BCM283X_PL011_SERIAL) += serial_bcm283x_pl011.o
+ obj-$(CONFIG_MSM_SERIAL) += serial_msm.o
+ obj-$(CONFIG_MSM_GENI_SERIAL) += serial_msm_geni.o
++obj-$(CONFIG_SERIAL_QCOM_EUD) += serial_qcom_eud.o
+ obj-$(CONFIG_MXS_AUART_SERIAL) += serial_mxs.o
+ obj-$(CONFIG_MVEBU_A3700_UART) += serial_mvebu_a3700.o
+ obj-$(CONFIG_MPC8XX_CONS) += serial_mpc8xx.o
+diff --git a/drivers/serial/serial_qcom_eud.c b/drivers/serial/serial_qcom_eud.c
+new file mode 100644
+index 00000000..2d82edc6
+--- /dev/null
++++ b/drivers/serial/serial_qcom_eud.c
+@@ -0,0 +1,166 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Console over the COM peripheral of Qualcomm's Embedded USB Debug (EUD). Whoever ran before
++ * U-Boot has to enable EUD.
++ *
++ * A COM packet is an ID byte, a length and up to 14 bytes, both ways. The host sends one packet
++ * at a time and waits for an acknowledgment, a 1-byte packet with ID EUD_COM_ACK_ID: while a
++ * packet is pending the hardware fails any further transfer, and one that collides with a packet
++ * being read can shorten or drop it. Same protocol as Linux's qcom_eud_serial.
++ */
++
++#include <dm.h>
++#include <serial.h>
++#include <asm/io.h>
++#include <linux/bitops.h>
++#include <linux/kernel.h>
++
++#define EUD_COM_TX_ID		0x00
++#define EUD_COM_TX_LEN		0x04
++#define EUD_COM_TX_DAT		0x08
++#define EUD_COM_RX_ID		0x0c
++#define EUD_COM_RX_LEN		0x10
++#define EUD_COM_RX_DAT		0x14
++#define EUD_INT_STATUS		0x44
++#define EUD_INT_RX		BIT(0)
++#define EUD_INT_TX		BIT(1)
++#define EUD_CTL_OUT		0x70	/* mirrors the host's control register */
++#define EUD_CTL_COM_EN		BIT(5)
++
++#define EUD_COM_PACKET_ID	0x90
++#define EUD_COM_ACK_ID		0x91
++#define EUD_COM_PACKET_MAX	14
++#define EUD_COM_TX_POLLS	100000
++
++struct eud_com_priv {
++	void __iomem *base;
++	u8 rx[EUD_COM_PACKET_MAX];
++	unsigned int rx_len, rx_pos;
++	bool stalled;
++};
++
++static u32 eud_read(struct eud_com_priv *priv, unsigned int reg)
++{
++	return readl(priv->base + reg) & 0xff;
++}
++
++static void eud_write(struct eud_com_priv *priv, unsigned int reg, u32 val)
++{
++	writel(val, priv->base + reg);
++}
++
++/* False if no host is there or it stopped reading: drop output rather than block U-Boot */
++static bool eud_tx_wait(struct eud_com_priv *priv)
++{
++	unsigned int polls = priv->stalled ? 1 : EUD_COM_TX_POLLS;
++
++	if (!(eud_read(priv, EUD_CTL_OUT) & EUD_CTL_COM_EN))
++		return false;
++	while (polls && !(eud_read(priv, EUD_INT_STATUS) & EUD_INT_TX))
++		polls--;
++	priv->stalled = !polls;
++	return polls;
++}
++
++static void eud_send(struct eud_com_priv *priv, u8 id, const char *s, unsigned int len)
++{
++	unsigned int i;
++
++	eud_write(priv, EUD_COM_TX_ID, id);
++	eud_write(priv, EUD_COM_TX_LEN, len);
++	for (i = 0; i < len; i++)
++		eud_write(priv, EUD_COM_TX_DAT, s[i]);
++}
++
++static ssize_t eud_com_puts(struct udevice *dev, const char *s, size_t len)
++{
++	struct eud_com_priv *priv = dev_get_priv(dev);
++
++	len = min_t(size_t, len, EUD_COM_PACKET_MAX);
++	if (eud_tx_wait(priv))
++		eud_send(priv, EUD_COM_PACKET_ID, s, len);
++	return len;
++}
++
++static int eud_com_putc(struct udevice *dev, const char ch)
++{
++	return eud_com_puts(dev, &ch, 1) == 1 ? 0 : -EIO;
++}
++
++/* Read a whole pending packet, which releases it, and let the host send the next one. */
++static void eud_rx_fill(struct eud_com_priv *priv)
++{
++	unsigned int id, len, i;
++
++	if (priv->rx_pos < priv->rx_len || !(eud_read(priv, EUD_INT_STATUS) & EUD_INT_RX))
++		return;
++
++	id = eud_read(priv, EUD_COM_RX_ID);
++	len = eud_read(priv, EUD_COM_RX_LEN);
++	priv->rx_pos = 0;
++	priv->rx_len = 0;
++	for (i = 0; i < len; i++) {
++		u8 ch = eud_read(priv, EUD_COM_RX_DAT);
++
++		if (id == EUD_COM_PACKET_ID && priv->rx_len < EUD_COM_PACKET_MAX)
++			priv->rx[priv->rx_len++] = ch;
++	}
++
++	if (eud_tx_wait(priv))
++		eud_send(priv, EUD_COM_ACK_ID, "\x06", 1);
++}
++
++static int eud_com_getc(struct udevice *dev)
++{
++	struct eud_com_priv *priv = dev_get_priv(dev);
++
++	eud_rx_fill(priv);
++	if (priv->rx_pos == priv->rx_len)
++		return -EAGAIN;
++	return priv->rx[priv->rx_pos++];
++}
++
++static int eud_com_pending(struct udevice *dev, bool input)
++{
++	struct eud_com_priv *priv = dev_get_priv(dev);
++
++	if (!input)
++		return 0;
++	eud_rx_fill(priv);
++	return priv->rx_len - priv->rx_pos;
++}
++
++static int eud_com_setbrg(struct udevice *dev, int baudrate)
++{
++	return 0;
++}
++
++static int eud_com_probe(struct udevice *dev)
++{
++	struct eud_com_priv *priv = dev_get_priv(dev);
++
++	priv->base = dev_read_addr_ptr(dev);
++	return priv->base ? 0 : -EINVAL;
++}
++
++static const struct dm_serial_ops eud_com_ops = {
++	.putc		= eud_com_putc,
++	.puts		= eud_com_puts,
++	.getc		= eud_com_getc,
++	.pending	= eud_com_pending,
++	.setbrg		= eud_com_setbrg,
++};
++
++static const struct udevice_id eud_com_ids[] = {
++	{ .compatible = "qcom,eud-com" },
++	{ }
++};
++
++U_BOOT_DRIVER(serial_qcom_eud) = {
++	.name		= "serial_qcom_eud",
++	.id		= UCLASS_SERIAL,
++	.of_match	= eud_com_ids,
++	.priv_auto	= sizeof(struct eud_com_priv),
++	.probe		= eud_com_probe,
++	.ops		= &eud_com_ops,
++};
+-- 
+2.43.0
+

@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 40f515fd0d20855b820ed6c8fe60cdb1a3e1215e Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sun, 1 Nov 2026 16:07:59 +0300
-Subject: [PATCH 27/27] tty: serial: add a boot console over Qualcomm EUD COM
+Subject: [PATCH 27/32] tty: serial: add a boot console over Qualcomm EUD COM
 
 EUD sits between the USB connector and the PHY, so its COM peripheral
 keeps working when the kernel's USB stack doesn't. Output is dropped

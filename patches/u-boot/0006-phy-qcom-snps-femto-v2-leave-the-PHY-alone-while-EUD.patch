@@ -1,0 +1,85 @@
+From b8b6201a2dfead7810f54ddf349ada8c9f9aa871 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:12:13 +0300
+Subject: [PATCH 6/9] phy: qcom: snps-femto-v2: leave the PHY alone while EUD
+ is enabled
+
+With the Embedded USB Debugger on, the PHY carries the EUD hub and its
+debug functions. Probe, power on and power off reset the PHY, which
+disconnected the debugger every time fastboot started. Like Qualcomm's
+own driver, skip that while the EUD enable register, an optional
+second reg, reads 1.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ drivers/phy/qcom/phy-qcom-snps-femto-v2.c | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/phy/qcom/phy-qcom-snps-femto-v2.c b/drivers/phy/qcom/phy-qcom-snps-femto-v2.c
+index bf1f16e4..68110c66 100644
+--- a/drivers/phy/qcom/phy-qcom-snps-femto-v2.c
++++ b/drivers/phy/qcom/phy-qcom-snps-femto-v2.c
+@@ -60,9 +60,19 @@
+ 
+ struct qcom_snps_hsphy {
+ 	void __iomem *base;
++	void __iomem *eud_en;	/* EUD enable register, optional */
+ 	struct reset_ctl_bulk resets;
+ };
+ 
++/*
++ * With the Embedded USB Debugger on, the PHY carries the EUD hub and its debug functions.
++ * Resetting or reprogramming it disconnects the debugger, so leave it as the EUD set it up.
++ */
++static bool qcom_snps_hsphy_eud_on(struct qcom_snps_hsphy *priv)
++{
++	return priv->eud_en && (readl(priv->eud_en) & BIT(0));
++}
++
+ /*
+  * We should just be able to use clrsetbits_le32() here, but this results
+  * in crashes on some boards. This is suspected to be because of some bus
+@@ -140,6 +150,9 @@ static int qcom_snps_hsphy_power_on(struct phy *phy)
+ 	struct qcom_snps_hsphy *priv = dev_get_priv(phy->dev);
+ 	int ret;
+ 
++	if (qcom_snps_hsphy_eud_on(priv))
++		return 0;
++
+ 	ret = reset_deassert_bulk(&priv->resets);
+ 	if (ret)
+ 		return ret;
+@@ -155,7 +168,8 @@ static int qcom_snps_hsphy_power_off(struct phy *phy)
+ {
+ 	struct qcom_snps_hsphy *priv = dev_get_priv(phy->dev);
+ 
+-	reset_assert_bulk(&priv->resets);
++	if (!qcom_snps_hsphy_eud_on(priv))
++		reset_assert_bulk(&priv->resets);
+ 
+ 	return 0;
+ }
+@@ -168,6 +182,7 @@ static int qcom_snps_hsphy_phy_probe(struct udevice *dev)
+ 	priv->base = dev_read_addr_ptr(dev);
+ 	if (!priv->base)
+ 		return -EINVAL;
++	priv->eud_en = dev_read_addr_index_ptr(dev, 1);
+ 
+ 	ret = reset_get_bulk(dev, &priv->resets);
+ 	if (ret < 0) {
+@@ -175,7 +190,10 @@ static int qcom_snps_hsphy_phy_probe(struct udevice *dev)
+ 		return ret;
+ 	}
+ 
+-	reset_assert_bulk(&priv->resets);
++	if (qcom_snps_hsphy_eud_on(priv))
++		printf("%s: EUD is enabled, leaving the PHY to it\n", dev->name);
++	else
++		reset_assert_bulk(&priv->resets);
+ 
+ 	return 0;
+ }
+-- 
+2.43.0
+

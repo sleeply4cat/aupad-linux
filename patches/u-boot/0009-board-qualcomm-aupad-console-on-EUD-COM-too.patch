@@ -1,0 +1,32 @@
+From 578cdbb71e4c83816983fbbc8da34f1bccd31532 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:12:13 +0300
+Subject: [PATCH 9/9] board: qualcomm: aupad: console on EUD COM too
+
+Mux the console onto the EUD COM port beside the UART.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ board/qualcomm/aupad.env | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/board/qualcomm/aupad.env b/board/qualcomm/aupad.env
+index 391eeec1..0010687d 100644
+--- a/board/qualcomm/aupad.env
++++ b/board/qualcomm/aupad.env
+@@ -1,8 +1,8 @@
+ bootdelay=1
+ bootretry=-1
+-stdin=serial
+-stdout=serial,vidconsole
+-stderr=serial,vidconsole
++stdin=serial,serial@1610000
++stdout=serial,serial@1610000,vidconsole
++stderr=serial,serial@1610000,vidconsole
+ fastboot=fastboot -l 0x805ff000 usb 0
+ pmos=scsi scan && ext4load scsi 0:b 0x805ff000 /boot/boot.img && bootm 0x805ff000
+ bootcmd=run pmos; run fastboot
+-- 
+2.43.0
+

@@ -1,29 +1,15 @@
 #!/bin/bash
 # RAM-boot an image through U-Boot, with no flashing and no Android: ub.sh <image> [max_seconds]
-# Needs U-Boot in recovery_b and boot-recovery in misc.  
+# Needs U-Boot in recovery_b and boot-recovery in misc.  Same verdicts as run.sh.
 set -u
 cd "$(dirname "$0")/.."
-mkdir -p logs
 IMG=$1; MAX=${2:-120}
-E=${EDL_PYTHON:-python3}
+E=/home/kirill/repo/edl/venv/bin/python
 UART=$(ls /tmp/aupad-uart 2>/dev/null || ls /dev/serial/by-id/usb-Nordic_nanobridge_*-if00)
-fb() { timeout 1 fastboot devices 2>/dev/null | grep -q .; }
+# tools/tab.py types only at a confirmed U-Boot prompt and checks that fastboot enumerates: any stray character
+# while U-Boot is in fastboot aborts it, which is what made the old ubstop.py loop miss
 T0=$(date +%s)
-# U-Boot autoboots pmOS after 1 s unless stopped
-fb || { venv/bin/python tools/ubstop.py 60 & STOP=$!; }
-for _ in $(seq 60); do
-    fb && break
-    case "$(lsusb | grep -oE '05c6:900e|18d1:d001|18d1:4e[0-9a-f]{2}|05c6:f000' | head -1)" in
-        05c6:900e) build/rdcap.sh | tail -1; sleep 3 ;;
-        18d1:d001) printf 'rb recovery\r' > $UART; sleep 3 ;;
-        18d1:4ee0) ;;
-        18d1:4e*)  adb reboot; sleep 3 ;;
-        05c6:f000) echo "tablet in off-mode charging: press power" ;;
-    esac
-    sleep 1
-done
-kill ${STOP:-} 2>/dev/null; wait ${STOP:-} 2>/dev/null
-fb || { echo "=== NOFASTBOOT after $(( $(date +%s) - T0 ))s"; exit 1; }
+venv/bin/python tools/tab.py fastboot || { echo "=== NOFASTBOOT after $(( $(date +%s) - T0 ))s"; exit 1; }
 LOG=logs/ub-$(date +%m%d-%H%M%S).log
 venv/bin/python tools/uartlog.py "$LOG" "$MAX" &
 LP=$!

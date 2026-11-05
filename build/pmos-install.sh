@@ -18,6 +18,8 @@ mkdir -p /var/lib/greetd/.config/pulse; cp /tmp/default.pa /var/lib/greetd/.conf
 chown -R greetd:greetd /var/lib/greetd/.config
 chown -R fastrpc:fastrpc /usr/share/qcom
 chmod 600 /etc/NetworkManager/system-connections/*
+# Root shell on the EUD COM console (/dev/ttyEUD0), beside the UART's
+grep -q '^ttyEUD0::' /etc/inittab || sed -i '/^ttyMSM0::/a ttyEUD0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyEUD0 vt100' /etc/inittab
 for s in dbus cgroups elogind apk-polkit-server udev-postmount bluetooth pd-mapper tqftpserv rmtfs nftables haveged wpa_supplicant \
          networkmanager chronyd greetd hexagonrpcd-adsp-sensorspd iio-sensor-proxy modemmanager openrc-settingsd \
          postmarketos-zram-swap rfkill sleep-inhibitor sshd local; do

@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From a6ae473560d9a6b73df9741464467d5d630890d5 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 03:45:58 +0300
-Subject: [PATCH 18/27] arm64: dts: qcom: sm6225-chuwi-aupad: add IPA
+Subject: [PATCH 18/32] arm64: dts: qcom: sm6225-chuwi-aupad: add IPA
 
 Same block as on agatti, plus the IMEM carve-out: without an sram
 reference the driver falls back to SC7180's IMEM address. The AP loads

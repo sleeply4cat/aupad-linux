@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From e54ea01f8735eaf726941e5e0fe18e383838f8eb Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Fri, 30 Oct 2026 22:06:46 +0300
-Subject: [PATCH 1/2] qcom: support UFS on SM6225
+Subject: [PATCH 1/9] qcom: support UFS on SM6225
 
 Add the SM6225 UFS PHY tables, the second RX symbol clock and the GDSC, and the
 ufs_reset special pin, so U-Boot can load a kernel from UFS.
@@ -183,3 +183,6 @@ index 7e80ea39..bf5f4324 100644
  	},
  	.functions_count = ARRAY_SIZE(msm_pinctrl_functions),
  	.get_function_name = sm6115_get_function_name,
+-- 
+2.43.0
+

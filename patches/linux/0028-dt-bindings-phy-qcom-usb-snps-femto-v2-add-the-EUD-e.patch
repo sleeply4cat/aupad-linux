@@ -1,0 +1,37 @@
+From a624bc56958fabc29c7ca10bb87416b6b47b3ff3 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:11:30 +0300
+Subject: [PATCH 28/32] dt-bindings: phy: qcom,usb-snps-femto-v2: add the EUD
+ enable register
+
+The Embedded USB Debugger runs its hub through the HS PHY. Describe its
+enable register as an optional second reg, so the PHY driver can tell
+when EUD owns the PHY.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ .../devicetree/bindings/phy/qcom,usb-snps-femto-v2.yaml    | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/phy/qcom,usb-snps-femto-v2.yaml b/Documentation/devicetree/bindings/phy/qcom,usb-snps-femto-v2.yaml
+index 661759b25..dbdec5a32 100644
+--- a/Documentation/devicetree/bindings/phy/qcom,usb-snps-femto-v2.yaml
++++ b/Documentation/devicetree/bindings/phy/qcom,usb-snps-femto-v2.yaml
+@@ -36,7 +36,12 @@ properties:
+           - const: qcom,usb-snps-hs-7nm-phy
+ 
+   reg:
+-    maxItems: 1
++    minItems: 1
++    items:
++      - description: PHY registers
++      - description:
++          EUD enable register. While the Embedded USB Debugger is on, the PHY
++          is left as the EUD set it up.
+ 
+   "#phy-cells":
+     const: 0
+-- 
+2.43.0
+

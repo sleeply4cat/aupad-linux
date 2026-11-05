@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Get the OpenOCD server running on the tablet, from whatever state it's in.  Run with venv/bin/python.
-Resets the EUD hub when its control function is missing, which happens on some boots.  Exits 1 if the RPM won't answer."""
+Resets the EUD hub when its control function is missing, which happens on some boots.  Exits 1 if the RPM won't answer.
+--core N also examines Kryo core N and checks that it answers; exits 1 if not (an idle core's debug block is off)."""
 import contextlib
 import os
 import socket
@@ -32,8 +33,30 @@ def answers():
     return "412fc231" in r.stdout
 
 
+def oc(*cmds):
+    return subprocess.run([os.path.join(HERE, "oc"), *cmds], capture_output=True, text=True, timeout=30).stdout
+
+
+def core_ok(n):
+    for _ in range(10):
+        oc(f"cpu{n} arp_examine")
+        if oc(f"cpu{n} was_examined").strip() == "1" and oc(f"cpu{n} curstate").strip() in ("running", "halted"):
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def done(msg):
+    if "--core" in sys.argv:
+        n = int(sys.argv[sys.argv.index("--core") + 1])
+        if not core_ok(n):
+            sys.exit(f"{msg}, but cpu{n} doesn't answer (powered down, or AP1 not reachable yet)")
+        msg += f", cpu{n} examined"
+    sys.exit(print(msg))
+
+
 if running() and answers():
-    sys.exit(print("server already up"))
+    done("server already up")
 subprocess.run([os.path.join(HERE, "oc"), "shutdown"], capture_output=True, timeout=30) if running() else None
 
 for attempt in range(4):
@@ -57,7 +80,7 @@ for attempt in range(4):
             break
         time.sleep(0.1)
     if running() and answers():
-        sys.exit(print("server up"))
+        done("server up")
     if running():
         subprocess.run([os.path.join(HERE, "oc"), "shutdown"], capture_output=True, timeout=30)
 sys.exit("the RPM doesn't answer")

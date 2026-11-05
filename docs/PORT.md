@@ -539,6 +539,16 @@ EXTRA="-DSTUB_WDT=120 -DSTUB_EUD=20" stub/mkstub.sh build/boot-eud.img
 - `0x1610070` mirrors the low byte of the host's CTLOUT, bytes repeated across the word; `COM_EN` is bit 5. The console reads it and drops output with no host. Kernel header calls `0x74` CTL_OUT_1, that's the next byte.
 - **The block has to be mapped non-posted.** With `ioremap` or `earlycon`'s posted mapping about 1 packet in 1000 is lost or damaged, and a read back after each byte or waiting for ready to drop only reduced it: 197 lost and 135 damaged of 200000. `ioremap_np`: none of 200000, the driver remaps its fixmap page. Writing `LEN` after the bytes sends nothing. RX still unsolved.
 
+### Two-way console without a UART: ttyEUD0 and U-Boot on EUD COM
+
+Kernel `/dev/ttyEUD0` (`CONFIG_SERIAL_QCOM_EUD`, `console=ttyEUD0`, takes over from the `qcom_eud` earlycon with no gap) and U-Boot (`CONFIG_SERIAL_QCOM_EUD`, `SERIAL_PROBE_ALL`, env console on `serial@1610000`). `build/pmos-install.sh` adds a root getty on ttyEUD0. Host: `tools/eudlog.py`, which records output and offers input as a pty at `/tmp/aupad-eud`.
+
+- RX protocol, measured on SM6225: a host packet is one OUT transfer of exactly `[0x90, len <= 14, data]`, pending until `RX_DAT` has been read `len` times. Further transfers fail while one is pending, and one colliding with a read can shorten or drop it, so the host sends one packet at a time and the tablet acks each with an ID 0x91 packet. COM commands (from github.com/quic/eud): `PORT_RESET` 03, `RX_TMOUT` 02 + u32 LE ms; an expired packet leaves RX dead until a reset, and `ff ff` (Qualcomm's own host value) stops RX events. `eudlog.py` sends `PORT_RESET`, `RX_TMOUT` 0xfffe and a hello on connect; a `-DSTUB_EUD` stub waits for that hello.
+- The EUD interrupt (SPI 189) never reaches the GIC, so both drivers poll. 20 KB through the shell intact, 1.6 KB/s.
+- The HS PHY must not be reset while EUD is on: patched in the kernel and U-Boot femto PHY drivers (optional `reg` for the EUD enable register). U-Boot's dwc3 peripheral disconnects before "fastboot boot" hands over.
+- U-Boot on the current DT needed: serial_msm_geni no longer enables an error-pointer clock, the sm6115 clock driver matches `qcom,sm6225-gcc`, a port failing under `SERIAL_PROBE_ALL` only warns, and `MMC_SDHCI_MSM` off (the SD controller faults without an RPM interconnect vote).
+- `tools/tab.py` drives boots with verified steps (`state`, `fastboot`, `boot`, `pmos`, `ramboot IMG [--attach N --ocd CMD]`); `tools/ocd/up --core N` checks that a Kryo core really answers. Stray characters while U-Boot is in fastboot abort it, which is why `ubstop.py` is superseded.
+
 ### OpenOCD and GDB: kernel and RPM debugging over SWD
 
 - **`tools/ocd/`: OpenOCD and GDB, debugging all 8 Kryo cores and the RPM (Resource Power Manager, a Cortex-M3) over SWD.** Upstream OpenOCD has an `eud` adapter driver. We use master `f13e839c5` plus `tools/ocd/eud-sm6225.patch` in `tools/ext/openocd`, with jimtcl built into `tools/ext/jim-inst`: `PKG_CONFIG_PATH=$PWD/../jim-inst/lib/pkgconfig ./configure --enable-eud --disable-werror && make`. Needs an image built as above.

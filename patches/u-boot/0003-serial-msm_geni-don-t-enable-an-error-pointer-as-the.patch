@@ -1,0 +1,41 @@
+From 34a27b97321a12838c0ee24290ff619a98ae5c00 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:12:13 +0300
+Subject: [PATCH 3/9] serial: msm_geni: don't enable an error pointer as the
+ UART clock
+
+When devm_clk_get_optional() fails, for example because no driver
+matches the clock controller, the probe logged it and then passed the
+error pointer to clk_enable(), which dereferenced it: a data abort
+before any console, so U-Boot just went silent. Carry on without the
+clock, as the bootloader left it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ drivers/serial/serial_msm_geni.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/serial/serial_msm_geni.c b/drivers/serial/serial_msm_geni.c
+index 30dab2c0..8a77488f 100644
+--- a/drivers/serial/serial_msm_geni.c
++++ b/drivers/serial/serial_msm_geni.c
+@@ -565,10 +565,13 @@ static int msm_serial_probe(struct udevice *dev)
+ 	struct clk *clk;
+ 
+ 	clk = devm_clk_get_optional(dev, NULL);
+-	if (IS_ERR(clk))
++	if (IS_ERR(clk)) {
++		/* e.g. no clock controller driver: keep the clock as the bootloader left it */
+ 		dev_dbg(dev, "Couldn't find UART clock: %ld", PTR_ERR(clk));
+-	else
++		clk = NULL;
++	} else {
+ 		priv->se = clk;
++	}
+ 
+ 	/* Try enable clock */
+ 	clk_enable(clk);
+-- 
+2.43.0
+

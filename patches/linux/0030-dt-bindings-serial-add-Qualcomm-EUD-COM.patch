@@ -1,0 +1,77 @@
+From 4b60afb039623d10b4993681dc6be2bba83b2fe1 Mon Sep 17 00:00:00 2001
+From: kirill <sleeply4cat@gmail.com>
+Date: Thu, 5 Nov 2026 03:11:30 +0300
+Subject: [PATCH 30/32] dt-bindings: serial: add Qualcomm EUD COM
+
+The COM function of the Embedded USB Debugger is a packet pipe between
+the USB host and the SoC, used as a serial port.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+---
+ .../bindings/serial/qcom,eud-com.yaml         | 53 +++++++++++++++++++
+ 1 file changed, 53 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/serial/qcom,eud-com.yaml
+
+diff --git a/Documentation/devicetree/bindings/serial/qcom,eud-com.yaml b/Documentation/devicetree/bindings/serial/qcom,eud-com.yaml
+new file mode 100644
+index 000000000..337fc72db
+--- /dev/null
++++ b/Documentation/devicetree/bindings/serial/qcom,eud-com.yaml
+@@ -0,0 +1,53 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/serial/qcom,eud-com.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Qualcomm Embedded USB Debugger COM port
++
++maintainers:
++  - Kirill <sleeply4cat@gmail.com>
++
++description:
++  The Embedded USB Debugger (EUD) sits between the USB connector and the HS
++  PHY and shows the host a hub with debug functions. Its COM function is a
++  packet pipe between the host and the SoC, used as a serial port. A
++  bootloader has to enable EUD first.
++
++allOf:
++  - $ref: serial.yaml#
++
++properties:
++  compatible:
++    items:
++      - enum:
++          - qcom,sm6225-eud-com
++      - const: qcom,eud-com
++
++  reg:
++    maxItems: 1
++
++  interrupts:
++    maxItems: 1
++
++  clocks:
++    maxItems: 1
++
++required:
++  - compatible
++  - reg
++
++unevaluatedProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/clock/qcom,gcc-sm6115.h>
++    #include <dt-bindings/interrupt-controller/arm-gic.h>
++
++    serial@1610000 {
++        compatible = "qcom,sm6225-eud-com", "qcom,eud-com";
++        reg = <0x01610000 0x1000>;
++        interrupts = <GIC_SPI 189 IRQ_TYPE_LEVEL_HIGH>;
++        clocks = <&gcc GCC_AHB2PHY_USB_CLK>;
++    };
+-- 
+2.43.0
+

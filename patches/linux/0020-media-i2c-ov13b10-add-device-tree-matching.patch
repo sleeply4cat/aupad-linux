@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 0b8b1c34b79156e4ecd048a586e861f454bdfee7 Mon Sep 17 00:00:00 2001
 From: kirill <sleeply4cat@gmail.com>
 Date: Sat, 31 Oct 2026 14:57:23 +0300
-Subject: [PATCH 20/27] media: i2c: ov13b10: add device tree matching
+Subject: [PATCH 20/32] media: i2c: ov13b10: add device tree matching
 
 The driver is ACPI only, though its power handling already works on
 device tree systems. The CHUWI AuPad uses this sensor on SM6225.
