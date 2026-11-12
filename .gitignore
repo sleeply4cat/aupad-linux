@@ -2,6 +2,7 @@
 /linux/
 /u-boot/
 /venv/
+/tools/ext/
 __pycache__/
 # Build output and anything taken from the device
 /build/out/
@@ -25,4 +26,5 @@ stub/*.elf
 stub/*.bin
 stub/stub+Image
 /build/pmos/overlay.tar.gz
+/build/pmos/modroot/
 /backup-*/

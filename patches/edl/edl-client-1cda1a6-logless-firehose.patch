@@ -1,0 +1,28 @@
+diff --git a/edlclient/Library/firehose.py b/edlclient/Library/firehose.py
+index fc55169..eb76f5a 100755
+--- a/edlclient/Library/firehose.py
++++ b/edlclient/Library/firehose.py
+@@ -733,7 +733,8 @@ class firehose(metaclass=LogBase):
+ 
+         progbar = progress(self.cfg.SECTOR_SIZE_IN_BYTES)
+         rsp = self.xmlsend(data, self.skipresponse)
+-        if "value" in rsp.data and rsp.data["value"] == "NAK":
++        # xmlsend returns data=raw bytes when the firehose replies without log lines
++        if isinstance(rsp.data, dict) and rsp.data.get("value") == "NAK":
+             return rsp
+         self.cdc.xmlread = False
+         resData = bytearray()
+@@ -1042,8 +1043,11 @@ class firehose(metaclass=LogBase):
+             self.info(f"TargetName={self.cfg.TargetName}")
+             self.info(f"MemoryName={self.cfg.MemoryName}")
+             self.info(f"Version={self.cfg.Version}")
+-            self.info("Trying to read first storage sector...")
+-            rsp = self.cmd_read_buffer(0, 1, 1, False)
++            if self.args["--skipstorageinit"]:
++                rsp = response(resp=True)   # some loaders never answer this probe
++            else:
++                self.info("Trying to read first storage sector...")
++                rsp = self.cmd_read_buffer(0, 1, 1, False)
+             self.info("Running configure...")
+             if not rsp.resp and self.args["--memory"] is None:
+                 for line in rsp.error:
