@@ -1,5 +1,5 @@
 diff --git a/src/jtag/drivers/eud.c b/src/jtag/drivers/eud.c
-index 1e1cad788..346c699a7 100644
+index 1e1cad78..75f42a49 100644
 --- a/src/jtag/drivers/eud.c
 +++ b/src/jtag/drivers/eud.c
 @@ -21,12 +21,14 @@
@@ -30,7 +30,7 @@ index 1e1cad788..346c699a7 100644
  
  static const unsigned int eud_speed_khz[] = {
  	120000,
-@@ -184,15 +190,47 @@ static int eud_libusb_reinit(void)
+@@ -184,16 +190,60 @@ static int eud_libusb_reinit(void)
  	return ERROR_OK;
  }
  
@@ -73,24 +73,42 @@ index 1e1cad788..346c699a7 100644
  		return ERROR_FAIL;
  	}
  
-+	/* A function that just enumerated is not usable until it is configured */
-+	libusb_set_configuration(dev->handle, 1);
+-	int ret = libusb_claim_interface(dev->handle, EUD_INTERFACE);
++	int ret;
 +
- 	int ret = libusb_claim_interface(dev->handle, EUD_INTERFACE);
++	/* A function that just enumerated is not usable until it is configured */
++	int config;
++	if (libusb_get_configuration(dev->handle, &config) != LIBUSB_SUCCESS || config != 1) {
++		ret = libusb_set_configuration(dev->handle, 1);
++		/* BUSY = configured already, another interface of it is claimed */
++		if (ret != LIBUSB_SUCCESS && ret != LIBUSB_ERROR_BUSY) {
++			if (!quiet)
++				LOG_ERROR("libusb_set_configuration() failed: %s", libusb_error_name(ret));
++			eud_close(dev);
++			return jtag_libusb_error(ret);
++		}
++	}
++
++	ret = libusb_claim_interface(dev->handle, EUD_INTERFACE);
  	if (ret != LIBUSB_SUCCESS) {
  		if (!quiet)
-@@ -203,6 +241,10 @@ static int eud_open_inner(uint16_t pid, struct eud_device *dev, bool quiet)
+ 			LOG_ERROR("libusb_claim_interface() failed: %s", libusb_error_name(ret));
+@@ -203,6 +253,14 @@ static int eud_open_inner(uint16_t pid, struct eud_device *dev, bool quiet)
  
  	dev->pid = pid;
  	dev->claimed = true;
 +
 +	/* Endpoints may be left halted by a previous session */
-+	libusb_clear_halt(dev->handle, EUD_EP_OUT);
-+	libusb_clear_halt(dev->handle, EUD_EP_IN);
++	if (libusb_clear_halt(dev->handle, EUD_EP_OUT) != LIBUSB_SUCCESS)
++		LOG_WARNING("EUD USB function %04x:%04x: failed to clear a halt on EP 0x02, transfers may fail",
++				EUD_VID, pid);
++	if (libusb_clear_halt(dev->handle, EUD_EP_IN) != LIBUSB_SUCCESS)
++		LOG_WARNING("EUD USB function %04x:%04x: failed to clear a halt on EP 0x81, transfers may fail",
++				EUD_VID, pid);
  	return ERROR_OK;
  }
  
-@@ -255,12 +297,19 @@ static int eud_op(struct eud_device *dev, uint8_t opcode, uint32_t payload)
+@@ -255,12 +313,19 @@ static int eud_op(struct eud_device *dev, uint8_t opcode, uint32_t payload)
  	buf[0] = opcode;
  	h_u32_to_le(&buf[1], payload);
  
@@ -112,7 +130,7 @@ index 1e1cad788..346c699a7 100644
  }
  
  static int eud_ctl_enable_swd(void)
-@@ -273,6 +322,13 @@ static int eud_ctl_enable_swd(void)
+@@ -273,6 +338,13 @@ static int eud_ctl_enable_swd(void)
  	if (retval != ERROR_OK)
  		goto out;
  
@@ -126,7 +144,7 @@ index 1e1cad788..346c699a7 100644
  	retval = eud_op(&eud_ctl, EUD_CTL_CMD_CTLOUT_SET, EUD_CTL_SWD_ON_SET);
  
  out:
-@@ -294,8 +350,10 @@ static int eud_open_swd_after_enable(void)
+@@ -294,8 +366,10 @@ static int eud_open_swd_after_enable(void)
  			return retval;
  
  		retval = eud_open_inner(EUD_SWD_PID, &eud_swd, true);
@@ -138,7 +156,7 @@ index 1e1cad788..346c699a7 100644
  	}
  
  	LOG_ERROR("unable to open EUD USB function %04x:%04x", EUD_VID, EUD_SWD_PID);
-@@ -355,7 +413,9 @@ static int eud_swd_bitbang(uint32_t payload)
+@@ -355,7 +429,9 @@ static int eud_swd_bitbang(uint32_t payload)
  	if (retval != ERROR_OK)
  		return retval;
  
@@ -149,7 +167,7 @@ index 1e1cad788..346c699a7 100644
  }
  
  static int eud_ditms_u16(uint16_t tms, uint16_t count)
-@@ -370,7 +430,12 @@ static int eud_ditms_u16(uint16_t tms, uint16_t count)
+@@ -370,7 +446,12 @@ static int eud_ditms_u16(uint16_t tms, uint16_t count)
  
  static int eud_swd_prepare(void)
  {
@@ -163,7 +181,7 @@ index 1e1cad788..346c699a7 100644
  }
  
  static int eud_ditms_sequence(const uint8_t *seq, unsigned int bit_len)
-@@ -686,12 +751,9 @@ static int eud_init(void)
+@@ -686,12 +767,9 @@ static int eud_init(void)
  		return ERROR_FAIL;
  	}
  
@@ -180,7 +198,7 @@ index 1e1cad788..346c699a7 100644
  	retval = eud_swd_prepare();
  	if (retval != ERROR_OK) {
 diff --git a/src/target/aarch64.c b/src/target/aarch64.c
-index b334a5b18..9726b1220 100644
+index b334a5b1..c1861d12 100644
 --- a/src/target/aarch64.c
 +++ b/src/target/aarch64.c
 @@ -557,7 +557,7 @@ static int aarch64_poll_smp(struct target *target, bool smp,
@@ -192,7 +210,7 @@ index b334a5b18..9726b1220 100644
  			if (armv8->arm.core_cache) {
  				register_cache_invalidate(armv8->arm.core_cache);
  				register_cache_invalidate(armv8->arm.core_cache->next);
-@@ -3229,6 +3229,60 @@ COMMAND_HANDLER(aarch64_mcrmrc_command)
+@@ -3229,6 +3229,66 @@ COMMAND_HANDLER(aarch64_mcrmrc_command)
  	return ERROR_OK;
  }
  
@@ -234,14 +252,20 @@ index b334a5b18..9726b1220 100644
 +
 +	/* EL1 registers can't be read from EL0 */
 +	bool el0 = arm->core_mode == ARMV8_64_EL0T;
-+	if (el0)
-+		armv8_dpm_modeswitch(dpm, ARMV8_64_EL1H);
-+
 +	uint64_t value = 0;
-+	retval = dpm->instr_read_data_r0_64(dpm, ARMV8_MRS(sys, 0), &value);
++	if (el0) {
++		retval = armv8_dpm_modeswitch(dpm, ARMV8_64_EL1H);
++		if (retval == ERROR_OK) {
++			retval = dpm->instr_read_data_r0_64(dpm, ARMV8_MRS(sys, 0), &value);
++			/* always come back; a failed restore is the worse error to hide */
++			int restore = armv8_dpm_modeswitch(dpm, ARM_MODE_ANY);
++			if (retval == ERROR_OK)
++				retval = restore;
++		}
++	} else {
++		retval = dpm->instr_read_data_r0_64(dpm, ARMV8_MRS(sys, 0), &value);
++	}
 +
-+	if (el0)
-+		armv8_dpm_modeswitch(dpm, ARM_MODE_ANY);
 +	dpm->finish(dpm);
 +	if (retval != ERROR_OK)
 +		return retval;
@@ -253,7 +277,7 @@ index b334a5b18..9726b1220 100644
  static const struct command_registration aarch64_exec_command_handlers[] = {
  	{
  		.name = "cache_info",
-@@ -3265,6 +3319,13 @@ static const struct command_registration aarch64_exec_command_handlers[] = {
+@@ -3265,6 +3325,13 @@ static const struct command_registration aarch64_exec_command_handlers[] = {
  		.help = "read coprocessor register",
  		.usage = "cpnum op1 CRn CRm op2",
  	},
@@ -268,7 +292,7 @@ index b334a5b18..9726b1220 100644
  		.chain = smp_command_handlers,
  	},
 diff --git a/src/target/armv8.c b/src/target/armv8.c
-index 88d8eaaf8..ea20a1ef8 100644
+index 88d8eaaf..ea20a1ef 100644
 --- a/src/target/armv8.c
 +++ b/src/target/armv8.c
 @@ -347,6 +347,15 @@ static int armv8_read_reg(struct armv8_common *armv8, int regnum, uint64_t *regv
@@ -298,7 +322,7 @@ index 88d8eaaf8..ea20a1ef8 100644
  
  static const struct {
 diff --git a/src/target/armv8.h b/src/target/armv8.h
-index 836528578..5d0f65a1e 100644
+index 83652857..5d0f65a1 100644
 --- a/src/target/armv8.h
 +++ b/src/target/armv8.h
 @@ -101,6 +101,7 @@ enum {
