@@ -17,4 +17,6 @@ struct.pack_into('<Q', out, 0x10, 0x10000 + ksize)   # stub header covers payloa
 open(sys.argv[3], 'wb').write(out)
 PY
 # ABL's gzip path never reaches the kernel entry: always ship it uncompressed.
+# The stub's console is the EUD COM from the first line: boot-console mode, no full ttyEUD console.
+CMDLINE=${CMDLINE:-"earlycon=qcom_eud,0x1610000 keep_bootcon ignore_loglevel rdinit=/init panic=10"} \
 KERNEL=$HERE/stub+Image "$ROOT/build/mkboot.sh" "${1:-$ROOT/build/boot-stub.img}"

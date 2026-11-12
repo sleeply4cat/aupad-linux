@@ -399,24 +399,36 @@ u64 stub_main(u64 dtb, u64 base, u64 x1, u64 x2, u64 x3)
 	kv("EUD mode_mgr2", smc_call(0xc2000502UL, 2, 0x1612000, 1));
 	kv("EUD en", rd(0x01611014));
 	/*
-	 * Hold the next stage back until the host reads the console: 8-16 s after EUD comes up.  COM_EN in CTL_OUT
-	 * survives a warm reset, so wait for tools/eudlog.py's hello instead, a COM packet it sends once it has the
-	 * function open.  Read it, which releases it, and acknowledge it like the console drivers do.  Already on
-	 * means an earlier stage did this.
+	 * Hold the next stage back until the host reads the console: 8-16 s after EUD comes up.  COM_EN in
+	 * CTL_OUT survives a warm reset, so wait for tools/eudlog.py's hello instead, a COM packet it sends
+	 * once it has the function open: [ID 0x91, length 1, byte 0x05].  Every packet is read to release
+	 * it and drained whole, whatever it is; only a real hello is acknowledged, like the console
+	 * drivers do, and anything else keeps the wait going.  A host that never makes TX ready again
+	 * doesn't wedge the boot: a second at most, then on without it.  Already on means an earlier
+	 * stage did this.
 	 */
 	t0 = read_cntpct();
 	while (!eud_was_on && read_cntpct() - t0 < STUB_EUD * 1000000UL * ticks_per_us)
 		if (rd(0x01610044) & 1) {	/* RX pending */
+			u32 id = rd(0x0161000c) & 0xff;
 			u32 n = rd(0x01610010) & 0xff;
+			u32 hello = 0;
 
-			while (n--)
-				rd(0x01610014);
-			while (!(rd(0x01610044) & 2))
-				;
-			wr(0x01610000, 0x91);	/* ack: ID, length, byte */
-			wr(0x01610004, 1);
-			wr(0x01610008, 6);
-			puts("EUD host connected\n");
+			if (n) {
+				hello = id == 0x91 && n == 1 && (rd(0x01610014) & 0xff) == 5;
+				while (--n)		/* drain the rest, whatever it is */
+					rd(0x01610014);
+			}
+			if (!hello)
+				continue;
+			if (wait_bit(0x01610044, 2, 1000000)) {
+				wr(0x01610000, 0x91);	/* ack: ID, length, byte */
+				wr(0x01610004, 1);
+				wr(0x01610008, 6);
+				puts("EUD host connected\n");
+			} else {
+				puts("EUD host gone before the ack\n");
+			}
 			break;
 		}
 #endif
