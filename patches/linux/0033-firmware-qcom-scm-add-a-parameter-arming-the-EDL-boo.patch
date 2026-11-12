@@ -1,0 +1,122 @@
+From b4cd340aad355abc920141258e5f609ce1c96720 Mon Sep 17 00:00:00 2001
+From: sleeply4cat <sleeply4cat@gmail.com>
+Date: Thu, 12 Nov 2026 23:46:06 +0300
+Subject: [PATCH 33/34] firmware: qcom: scm: add a parameter arming the EDL
+ boot cookie
+
+Android reaches the emergency download mode (EDL, QDLoader 9008) with
+"adb reboot edl": downstream kernels write QCOM_DOWNLOAD_EDL = 0x01
+into the TCSR BOOT_MISC_DETECT register through an SCM IO call and
+warm-reset; the boot stages consume the bit on the next start.
+
+Mainline keeps the dump-mode bits of that register in sync around the
+download_mode parameter, but the GENMASK(5, 4) mask never touches the
+EDL bit 0.  Add an "edl" module parameter that RMWs bit 0 of the same
+register, leaving the dump bits alone:
+
+    echo 1 > /sys/module/qcom_scm/parameters/edl && reboot -f
+
+The bit survives both the probe-time NODUMP write and the clean
+shutdown, and the boot stages clear it after entering the downloader,
+so an ordinary reboot never loops into EDL.  Without a qcom,dload-mode
+register the parameter fails with -ENODEV: the SCM
+BOOT_SET_DLOAD_MODE fallback would arm a dump mode, not the EDL bit.
+---
+ drivers/firmware/qcom/qcom_scm.c | 67 ++++++++++++++++++++++++++++++++
+ 1 file changed, 67 insertions(+)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 3eaa4c9cc..af554a3d5 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -144,6 +144,13 @@ static const u8 qcom_scm_cpu_warm_bits[QCOM_SCM_BOOT_MAX_CPUS] = {
+ #define QCOM_DLOAD_MINIDUMP	2
+ #define QCOM_DLOAD_BOTHDUMP	3
+ 
++/*
++ * TCSR BOOT_MISC_DETECT bit 0: enter EDL (QDLoader 9008) on the next warm
++ * reset.  Downstream calls this QCOM_DOWNLOAD_EDL and arms it for
++ * "adb reboot edl"; the dump-mode mask above leaves the bit alone.
++ */
++#define QCOM_DLOAD_EDL		BIT(0)
++
+ /* Minidump destination values written to always-on SRAM for boot firmware */
+ #define QCOM_MINIDUMP_DEST_USB		0x0
+ #define QCOM_MINIDUMP_DEST_STORAGE	0x2
+@@ -2749,6 +2756,58 @@ static const struct kernel_param_ops download_mode_param_ops = {
+ module_param_cb(download_mode, &download_mode_param_ops, NULL, 0644);
+ MODULE_PARM_DESC(download_mode, "download mode: off/0/N for no dump mode, full/on/1/Y for full dump mode, mini for minidump mode and full,mini for both full and minidump mode together are acceptable values");
+ 
++static bool edl_mode;
++
++static int get_edl_mode(char *buffer, const struct kernel_param *kp)
++{
++	return sysfs_emit(buffer, "%d\n", edl_mode);
++}
++
++static int set_edl_mode(const char *val, const struct kernel_param *kp)
++{
++	struct qcom_scm *scm;
++	bool tmp;
++	int ret;
++
++	ret = kstrtobool(val, &tmp);
++	if (ret)
++		return ret;
++
++	edl_mode = tmp;
++
++	/* Pairs with smp_store_release() in qcom_scm_probe(). */
++	scm = smp_load_acquire(&__scm);
++	if (!scm)
++		return 0;
++
++	/*
++	 * Only the TCSR register carries the EDL bit; the SCM call fallback
++	 * of qcom_scm_set_download_mode() would arm a dump mode instead.
++	 */
++	if (!scm->dload_mode_addr) {
++		edl_mode = false;
++		dev_err(scm->dev, "no qcom,dload-mode register, EDL mode unsupported\n");
++		return -ENODEV;
++	}
++
++	ret = qcom_scm_io_rmw(scm->dload_mode_addr, QCOM_DLOAD_EDL,
++			      tmp ? QCOM_DLOAD_EDL : 0);
++	if (ret) {
++		edl_mode = !tmp;
++		return ret;
++	}
++
++	return 0;
++}
++
++static const struct kernel_param_ops edl_mode_param_ops = {
++	.get = get_edl_mode,
++	.set = set_edl_mode,
++};
++
++module_param_cb(edl, &edl_mode_param_ops, NULL, 0644);
++MODULE_PARM_DESC(edl, "arm the EDL (QDLoader 9008) boot cookie: 1 makes the next warm reset enter EDL, the boot stages consume and clear the bit");
++
+ static int get_minidump_dest(char *buffer, const struct kernel_param *kp)
+ {
+ 	int i;
+@@ -2916,6 +2975,14 @@ static int qcom_scm_probe(struct platform_device *pdev)
+ 	 */
+ 	qcom_scm_set_download_mode(scm, download_mode);
+ 
++	/* Likewise arm the EDL cookie if requested on the command line. */
++	if (edl_mode && scm->dload_mode_addr) {
++		ret = qcom_scm_io_rmw(scm->dload_mode_addr, QCOM_DLOAD_EDL,
++				      QCOM_DLOAD_EDL);
++		if (ret)
++			dev_err(scm->dev, "failed to arm the EDL cookie: %d\n", ret);
++	}
++
+ 	/*
+ 	 * Disable SDI if indicated by DT that it is enabled by default.
+ 	 */
+-- 
+2.43.0
+

@@ -50,7 +50,7 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 
 | Path | Contents |
 |---|---|
-| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, camera, battery, device tree |
+| `patches/linux/` | Kernel series: clocks, UFS PHY, UBWC, PWM, panel, audio, camera, battery, SCM EDL entry, device tree |
 | `patches/u-boot/` | U-Boot series: UFS on SM6225, EUD console, current-DT fixes, boot environment |
 | `configs/aupad_defconfig` | Kernel config |
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
@@ -72,6 +72,9 @@ JTAG probe, UART wiring or opened case. It keeps working when Linux is dead. On 
   watchpoints, source lines, `lx-dmesg`, `lx-ps` and `$lx_current()`. `tools/ocd/g rpm` does the same for the RPM's Cortex-M3.
 - **Kernel log without a UART:** `tools/eudlog.py` records the console from the first line, `[0.000000] Linux version`, through
   reboots and up to the last line of a panic. The console is `earlycon=qcom_eud,0x1610000 keep_bootcon`, in the kernel series.
+- **EDL from the running system:** `echo 1 > /sys/module/qcom_scm/parameters/edl && reboot -f` boots into the Qualcomm
+  downloader (`05c6:9008`) — the same TrustZone cookie `adb reboot edl` arms on stock. The boot stages clear it, so the next
+  boot is normal; `tools/ocd/srst` is the way out of EDL itself.
 
 Setup, patches to upstream OpenOCD and limits: [docs/PORT.md](docs/PORT.md#debugging-over-usb-qualcomm-eud-embedded-usb-debug).
 
