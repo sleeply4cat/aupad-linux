@@ -22,12 +22,17 @@ lost. The block is mapped non-posted, as the boot console's is.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_015ya7ejvazDaFBN5SE4ttFx
+RX packets with a length past 14 can only be a broken transfer: they are
+still drained to release the hardware, but none of it reaches the TTY, and
+both that and console output dropped with no host reading are counted and
+reported. The console's wait for TX-ready is bounded in time now
+(local_clock, 10 ms), not in polls, so it stays bounded at any clock rate.
+
 ---
- drivers/tty/serial/Kconfig           |  11 +
- drivers/tty/serial/Makefile          |   1 +
- drivers/tty/serial/qcom_eud_serial.c | 427 +++++++++++++++++++++++++++
- 3 files changed, 439 insertions(+)
- create mode 100644 drivers/tty/serial/qcom_eud_serial.c
+ drivers/tty/serial/Kconfig           | 11 +++++++++++
+ drivers/tty/serial/Makefile          | 1 +
+ drivers/tty/serial/qcom_eud_serial.c | 446 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 458 insertions(+)
 
 diff --git a/drivers/tty/serial/Kconfig b/drivers/tty/serial/Kconfig
 index ca17a4062..6c3343dcc 100644
@@ -65,10 +70,12 @@ index b1e783beb..ed467ddf0 100644
  obj-$(CONFIG_SERIAL_RDA)		+= rda-uart.o
 diff --git a/drivers/tty/serial/qcom_eud_serial.c b/drivers/tty/serial/qcom_eud_serial.c
 new file mode 100644
-index 000000000..5d0e85da0
+index 000000000..7f3de4f44 100644
 --- /dev/null
 +++ b/drivers/tty/serial/qcom_eud_serial.c
-@@ -0,0 +1,427 @@
+--- 
++++ 
+@@ -0,0 +1,446 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Serial port and console over the COM peripheral of Qualcomm's Embedded USB Debug (EUD), as
@@ -103,6 +110,7 @@ index 000000000..5d0e85da0
 +#include <linux/module.h>
 +#include <linux/of.h>
 +#include <linux/platform_device.h>
++#include <linux/sched/clock.h>
 +#include <linux/serial_core.h>
 +#include <linux/tty.h>
 +#include <linux/timer.h>
@@ -123,7 +131,7 @@ index 000000000..5d0e85da0
 +#define EUD_COM_PACKET_ID	0x90
 +#define EUD_COM_ACK_ID		0x91
 +#define EUD_COM_PACKET_MAX	14
-+#define EUD_COM_TX_POLLS	100000
++#define EUD_COM_TX_TIMEOUT_US	10000	/* ~the old 100000-poll worst case, in time, not polls */
 +#define EUD_POLL_IDLE_MS	20
 +#define EUD_POLL_BUSY_MS	500	/* poll every jiffy for this long after traffic */
 +
@@ -134,6 +142,9 @@ index 000000000..5d0e85da0
 +	unsigned long busy_until;
 +	bool ack_pending;
 +	bool stalled;
++	unsigned int rx_malformed;	/* packets drained with a length past EUD_COM_PACKET_MAX */
++	unsigned int tx_dropped;	/* bytes dropped with no host reading */
++	unsigned int reported;		/* counters as of the last report */
 +};
 +
 +static struct eud_com *eud_com_console_port;
@@ -185,6 +196,7 @@ index 000000000..5d0e85da0
 +	while (eud->ack_pending || !kfifo_is_empty(&tport->xmit_fifo)) {
 +		if (!eud_host_present(port)) {
 +			eud->ack_pending = false;
++			eud->tx_dropped += kfifo_len(&tport->xmit_fifo);
 +			uart_xmit_advance(port, kfifo_len(&tport->xmit_fifo));
 +			break;
 +		}
@@ -212,11 +224,15 @@ index 000000000..5d0e85da0
 +
 +	id = eud_read(port, EUD_COM_RX_ID);
 +	len = eud_read(port, EUD_COM_RX_LEN);
++	/* A length past the packet size means a broken transfer: drain all of it, but none
++	 * of it reaches the TTY as input */
++	if (len > EUD_COM_PACKET_MAX)
++		to_eud(port)->rx_malformed++;
 +	/* Reading all of it is what releases the packet, whatever is in it */
 +	for (i = 0; i < len; i++) {
 +		u8 ch = eud_read(port, EUD_COM_RX_DAT);
 +
-+		if (id != EUD_COM_PACKET_ID)
++		if (id != EUD_COM_PACKET_ID || i >= EUD_COM_PACKET_MAX)
 +			continue;
 +		port->icount.rx++;
 +		if (!uart_prepare_sysrq_char(port, ch))
@@ -243,6 +259,12 @@ index 000000000..5d0e85da0
 +	if (rx || !kfifo_is_empty(&port->state->port.xmit_fifo))
 +		eud->busy_until = jiffies + msecs_to_jiffies(EUD_POLL_BUSY_MS);
 +	uart_unlock_and_check_sysrq_irqrestore(port, flags);
++
++	if (eud->rx_malformed + eud->tx_dropped != eud->reported) {
++		dev_info_ratelimited(port->dev, "COM transport: %u malformed RX packets, %u TX bytes dropped\n",
++				      eud->rx_malformed, eud->tx_dropped);
++		eud->reported = eud->rx_malformed + eud->tx_dropped;
++	}
 +
 +	if (rx)
 +		tty_flip_buffer_push(&port->state->port);
@@ -355,14 +377,18 @@ index 000000000..5d0e85da0
 +
 +	while (n && eud_host_present(port)) {
 +		unsigned int len = min(n, EUD_COM_PACKET_MAX);
-+		unsigned int polls = eud->stalled ? 1 : EUD_COM_TX_POLLS;
++		/* local_clock() keeps time with IRQs off; once stalled, a single re-check per line */
++		u64 deadline = eud->stalled ? local_clock() :
++			       local_clock() + EUD_COM_TX_TIMEOUT_US * 1000;
 +
-+		while (polls && !eud_tx_ready(port))
-+			polls--;
++		while (!eud_tx_ready(port) && (s64)(deadline - local_clock()) > 0)
++			cpu_relax();
 +		/* Host stopped reading: drop output, don't spin on every line meanwhile */
-+		eud->stalled = !polls;
-+		if (eud->stalled)
++		eud->stalled = !eud_tx_ready(port);
++		if (eud->stalled) {
++			eud->tx_dropped += n;
 +			break;
++		}
 +
 +		eud_send(port, EUD_COM_PACKET_ID, s, len);
 +		s += len;
@@ -496,6 +522,7 @@ index 000000000..5d0e85da0
 +
 +MODULE_DESCRIPTION("Serial port and console over Qualcomm EUD COM");
 +MODULE_LICENSE("GPL");
+
 -- 
 2.43.0
 
