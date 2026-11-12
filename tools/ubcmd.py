@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Stop U-Boot's autoboot, run commands one by one, then boot on.  usage: ubcmd.py <seconds> <cmd>..."""
-import glob, sys, time, serial
+"""Stop U-Boot's autoboot, run commands one by one, then boot on.  usage: ubcmd.py <seconds> <cmd>...
+Talks to the EUD COM pty; tools/eudlog.py must be running, it creates /tmp/aupad-eud."""
+import sys, time, serial
 
-port = serial.Serial((glob.glob('/tmp/aupad-uart') or glob.glob('/dev/serial/by-id/usb-Nordic_nanobridge_*-if00'))[0], 115200, timeout=0.05)
+try:
+	port = serial.Serial('/tmp/aupad-eud', 115200, timeout=0.05)
+except serial.SerialException as e:
+	sys.exit(f'{e}\nno /tmp/aupad-eud: is tools/eudlog.py running?')
 end = time.time() + float(sys.argv[1])
 seen = b''
 while b'=> ' not in seen[-64:]:

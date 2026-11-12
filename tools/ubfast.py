@@ -5,7 +5,7 @@ import os, subprocess, sys, time, tty
 def up():
     return b'18d1:4ee0' in subprocess.check_output(['lsusb'])
 
-f = os.open('/tmp/aupad-uart', os.O_RDWR | os.O_NOCTTY)
+f = os.open('/tmp/aupad-eud', os.O_RDWR | os.O_NOCTTY)	# EUD COM pty from tools/eudlog.py
 tty.setraw(f)
 for _ in range(5):
     if up():
