@@ -98,6 +98,9 @@ CMDLINE="earlycon=qcom_geni,0x4a90000 console=ttyMSM0,115200n8 ignore_loglevel \
 clk_ignore_unused pd_ignore_unused rdinit=/init panic=10 root=pmos" build/mkboot.sh build/boot-pmos.img
 ```
 
+For the EDL path (last resort) also clone bkerler's edl at `1cda1a6`, apply `patches/edl/` to it and
+`pip install .` into the venv; the firehose loader is not redistributable, see docs/PORT.md.
+
 U-Boot is based on `3973f3c4` of https://source.denx.de/u-boot/u-boot.git, configured with `qcom_defconfig` plus
 `qcom-phone.config`, then `CONFIG_ENV_DEFAULT_ENV_TEXT_FILE="board/qualcomm/aupad.env"`, `PANIC_HANG` and
 `TOOLS_MKEFICAPSULE` off. Then:
