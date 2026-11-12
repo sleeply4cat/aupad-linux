@@ -28,8 +28,6 @@ alone entirely while the EUD owns it.
 
 diff --git a/drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c b/drivers/phy/qualcomm/phy-qcom-snps-femto-v2.c
 index 980ad1fb1..ce720c0d1 100644
---- 
-+++ 
 @@ -113,12 +113,14 @@
   *
   * @phy: generic phy

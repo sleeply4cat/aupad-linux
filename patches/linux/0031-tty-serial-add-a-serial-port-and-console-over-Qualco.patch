@@ -73,8 +73,6 @@ new file mode 100644
 index 000000000..7f3de4f44 100644
 --- /dev/null
 +++ b/drivers/tty/serial/qcom_eud_serial.c
---- 
-+++ 
 @@ -0,0 +1,446 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
