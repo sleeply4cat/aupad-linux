@@ -1,0 +1,48 @@
+From d30022c25496cd2ae3c952535c3ad8dd9e70a99c Mon Sep 17 00:00:00 2001
+From: sleeply4cat <sleeply4cat@gmail.com>
+Date: Fri, 13 Nov 2026 22:32:01 +0300
+Subject: [PATCH 3/3] arm64: dts: qcom: sm6225-chuwi-aupad: mark the power key
+ and USB as wake sources
+
+The power key lives on the PMIC's PON block and now reaches the APSS
+through the MPM, so give it wakeup-source to test button wake from
+suspend, and the same for the USB gadget so an attached host can raise
+it.  Drop the duplicated &pon_pwrkey/&pon_resin blocks.
+
+Signed-off-by: kirill <sleeply4cat@gmail.com>
+---
+ arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts | 11 ++---------
+ 1 file changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+index bea5bd7a5..cfba11f73 100644
+--- a/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
++++ b/arch/arm64/boot/dts/qcom/sm6225-chuwi-aupad.dts
+@@ -301,15 +301,7 @@ &pm6125_pwm {
+ };
+ 
+ &pon_pwrkey {
+-	status = "okay";
+-};
+-
+-&pon_resin {
+-	linux,code = <KEY_VOLUMEDOWN>;
+-	status = "okay";
+-};
+-
+-&pon_pwrkey {
++	wakeup-source;
+ 	status = "okay";
+ };
+ 
+@@ -364,6 +356,7 @@ &usb {
+ 	/* No USB3 PHY yet: clock the PIPE interface from UTMI. */
+ 	qcom,select-utmi-as-pipe-clk;
+ 
++	wakeup-source;
+ 	status = "okay";
+ };
+ 
+-- 
+2.43.0
+

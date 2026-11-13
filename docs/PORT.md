@@ -246,6 +246,18 @@ s2idle (`rtcwake -d rtc0 -m freeze -s 15`, `qcom_stats` loaded) completes only w
 - A failed `rtcwake` says `write error`; check `/sys/power/suspend_stats`, and don't trust counters from such a run.
 - Only the RTC wake is tested; power button isn't. `clk_ignore_unused pd_ignore_unused` still on the cmdline, removal untested.
 
+### Power fixes landed (2026-11-13, not yet hardware-tested)
+
+Full analysis and staged plan: `audit/Энергосбережение_исследование.md`. Landed this session:
+
+- **0040 `dwc3-qcom`: UTMI PIPE clock restored on resume.** Backport of the upstream fix (Falezza, 2026-10-27, patchew 20261027-dwc3-utmi-resume): the glue only programmed QSCRATCH GENERAL_CFG in probe, CX collapse during s2idle drops it, and the gadget dies with `failed to enable ep0out` — our exact symptom, including the preceding `HS-PHY not in L2`. The property is now remembered and reselected in `dwc3_qcom_resume()`. Expected: gadget and ssh survive suspend, second suspend no longer fails with -11.
+- **0041 RPM master stats.** Five v2 structs in MSG RAM at `0x45f0150` (stride `0x1000`: APSS/MPSS/ADSP/CDSP/TZ) taken from the stock khaje DTB (`vendor_boot` blob 0), wired to `qcom,rpm-master-stats`; `CONFIG_QCOM_RPM_MASTER_STATS=m` added. `debugfs qcom_rpm_master_stats/*` will name the master that keeps the chip out of vlow/vmin. `CONFIG_QCOM_PDC`/`RESET_QCOM_PDC` dropped — PDC doesn't exist on this RPM-generation die.
+- **0042 MPM.** khaje is the qcm2290 die family, so the node mirrors in-tree qcm2290 (agatti): vMPM slice at MSG RAM `0x1b8` (matches the stock DTB's `mpm@45f01b8`), APCS mbox channel 1, 96 pins, pin map 2→275 (TSENS0), 5→296 (SoundWire), 12→422 (DWC3 SS), 24→79 (SoundWire wake), 86→183 (SPMI), 90→260 (QUSB2). The spmi-arb and tsens0-uplow interrupts are routed through it, so PON/RTC/charging and thermal can wake the chip once the GIC is unclocked. Power-button wake becomes testable.
+- **0043 wake sources.** `wakeup-source` on `pon_pwrkey` and the USB gadget; the duplicated `&pon_pwrkey`/`&pon_resin` blocks removed.
+- **elogind hook.** `build/pmos/aupad-system-sleep.sh` (installed by mkrootfs.sh to `/etc/elogind/system-sleep/aupad.sh`): stops `iio-sensor-proxy` and `hexagonrpcd-adsp-sensorspd` before suspend, restarts after — formalises the ADSP workaround above.
+
+Test order on hardware: (1) boot, `modprobe rpm_master_stats`, baseline read of `qcom_stats` + master stats; (2) `rtcwake -m freeze -s 30` with the gadget attached and ssh up — expect ep0out fixed, ssh alive through the cycle, run it twice; (3) suspend with the cable out, compare vlow/vmin and per-master sleep times; (4) wake with the power button; (5) then the cmdline flags `clk_ignore_unused pd_ignore_unused`.
+
 
 ## Bluetooth audio (2026-10-31)
 

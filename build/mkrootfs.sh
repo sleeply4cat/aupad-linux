@@ -31,6 +31,9 @@ mkdir -p root/lib/modules
 cp -a modroot/lib/modules/* root/lib/modules/
 cp ../tests/rx ../tests/rb root/usr/sbin/
 cp ../tests/flash.sh root/usr/sbin/flash
+mkdir -p root/etc/elogind/system-sleep
+cp aupad-system-sleep.sh root/etc/elogind/system-sleep/aupad.sh
+chmod 0755 root/etc/elogind/system-sleep/aupad.sh
 mkdir -p root/lib/firmware/qcom
 cp ../../firmware/a630_sqe.fw ../../firmware/a610_zap.mdt ../../firmware/a610_zap.b0? root/lib/firmware/qcom/
 rm -f "$OUT"
