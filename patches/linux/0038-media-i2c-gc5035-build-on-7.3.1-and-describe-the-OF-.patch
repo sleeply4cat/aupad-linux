@@ -1,0 +1,75 @@
+From 032704c389c06b9385993dfe201cad82931d3976 Mon Sep 17 00:00:00 2001
+From: sleeply4cat <sleeply4cat@gmail.com>
+Date: Fri, 13 Nov 2026 10:24:05 +0300
+Subject: [PATCH] media: i2c: gc5035: build on 7.3.1 and describe the OF match
+
+Drop the v4l2_subdev_client_info parameters the pad ops grew after
+7.3.1, add the "galaxycore,gc5035" OF match the ACPI-only upstream
+series lacks (no bindings there either, same as gc08a3), and add the
+i2c_device_id so a client can also be instantiated by name.
+---
+ drivers/media/i2c/gc5035.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/i2c/gc5035.c b/drivers/media/i2c/gc5035.c
+index f8cd56a46..b75ccfe31 100644
+--- a/drivers/media/i2c/gc5035.c
++++ b/drivers/media/i2c/gc5035.c
+@@ -663,7 +663,6 @@ static void gc5035_fill_format(struct v4l2_mbus_framefmt *fmt,
+ }
+ 
+ static int gc5035_get_selection(struct v4l2_subdev *sd,
+-				const struct v4l2_subdev_client_info *ci,
+ 				struct v4l2_subdev_state *state,
+ 				struct v4l2_subdev_selection *sel)
+ {
+@@ -692,7 +691,6 @@ static int gc5035_get_selection(struct v4l2_subdev *sd,
+ }
+ 
+ static int gc5035_set_selection(struct v4l2_subdev *sd,
+-				const struct v4l2_subdev_client_info *ci,
+ 				struct v4l2_subdev_state *state,
+ 				struct v4l2_subdev_selection *sel)
+ {
+@@ -744,7 +742,6 @@ static int gc5035_set_selection(struct v4l2_subdev *sd,
+  * rectangle first. The default size gives the default rectangle back.
+  */
+ static int gc5035_set_fmt(struct v4l2_subdev *sd,
+-			  const struct v4l2_subdev_client_info *ci,
+ 			  struct v4l2_subdev_state *state,
+ 			  struct v4l2_subdev_format *fmt)
+ {
+@@ -1329,6 +1326,18 @@ static const struct dev_pm_ops gc5035_pm_ops = {
+ 	RUNTIME_PM_OPS(gc5035_power_off, gc5035_power_on, NULL)
+ };
+ 
++static const struct of_device_id gc5035_of_match[] = {
++	{ .compatible = "galaxycore,gc5035" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, gc5035_of_match);
++
++static const struct i2c_device_id gc5035_id_table[] = {
++	{ "gc5035" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, gc5035_id_table);
++
+ static const struct acpi_device_id gc5035_acpi_ids[] = {
+ 	{ .id = "GCTI5035" },
+ 	{ }
+@@ -1338,9 +1347,11 @@ MODULE_DEVICE_TABLE(acpi, gc5035_acpi_ids);
+ static struct i2c_driver gc5035_i2c_driver = {
+ 	.driver = {
+ 		.name = "gc5035",
++		.of_match_table = gc5035_of_match,
+ 		.acpi_match_table = gc5035_acpi_ids,
+ 		.pm = pm_ptr(&gc5035_pm_ops),
+ 	},
++	.id_table = gc5035_id_table,
+ 	.probe = gc5035_probe,
+ 	.remove = gc5035_remove,
+ };
+-- 
+2.43.0
+
