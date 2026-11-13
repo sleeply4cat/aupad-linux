@@ -39,7 +39,7 @@ attached, but setting it up rewrites partitions, and getting it wrong can leave 
 | Boot | Broken | Some boots freeze the whole SoC around 10 s |
 | Suspend | Partial | Works only with workarounds, no whole-chip sleep, USB lost on resume. Disabled |
 | Rear camera | Partial | OV13B10 through CAMSS and libcamera, works in Snapshot. Fixed focus in apps, no gain control, crops in portrait. Megapixels has controls but its preview blinks |
-| Front camera | Working | GC5035 at CCI 0x37 (hidden in the SMBus reserved block, why every scan missed it), 2592x1944@30 and 1296x972 binned through csiphy2. Raw streaming checked, no app tuning yet |
+| Front camera | Working | GC5035 at CCI 0x37 (hidden in the SMBus reserved block, why every scan missed it), 2592x1944@30 and 1296x972 binned through csiphy2. Raw streaming and in-app use checked, orientation correct |
 | Debugging | Works | Qualcomm EUD over USB-C: OpenOCD and GDB, two-way U-Boot and kernel console without a UART |
 | USB3, packaging for pmaports | Not started | |
 
