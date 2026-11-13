@@ -265,7 +265,12 @@ Hardware findings of the same session:
 - **rtcwake is the wrong tool here:** `-m no` returns immediately by design ("don't suspend, just set the alarm"), and its ioctl-arming path produced a 6.3M `pm8xxx_rtc_alarm` IRQ storm that woke freezes in ~240 ms (and 3 s on the old kernel). Sysfs arming (`echo $((E+N)) > /sys/class/rtc/rtc0/wakealarm`) is exact: 1 IRQ after N seconds, no storm; `echo 0 > wakealarm` clears any leftover. Use sysfs + `echo freeze > /sys/power/state` (from `nohup`, the ssh session dies with the gadget) for suspend measurements.
 - **Dropping `clk_ignore_unused pd_ignore_unused` is not safe yet:** it boots, but audio fails at boot (`snd-sc8280xp: can't create pcm MultiMedia1 Playback :-110`, the audio PD doesn't come up), and the first suspend leaves the GPU locked up (msm hangcheck spam, UI frozen, gadget `configured` but the host never creates the NCM interface). Both flags restored; they stay until the audio-PD bring-up and the GPU resume path are understood (stage D of the plan).
 
-Remaining from the test order: suspend with the cable out (vlow/vmin comparison), power-button wake by hand, and the gadget-link rebind question (EUD off vs on).
+Remaining from the test order: ~~suspend with the cable out~~, ~~power-button wake by hand~~ — both done later that night:
+
+- **Cable-out cycle** (60 s freeze, flags on): RTC alarm woke it after 62 s; `vlow`/`vmin` **still 0 without the cable** — USB is not the vlow blocker; the APSS-side suspects stand. Post-wake Client Votes `0x87838783` vs idle `0x87858785` (the cable's own bit drops out). Replugging after resume does not bring the gadget link back — same unbind/bind needed.
+- **Power-button wake**: froze, pressed the button after ~16 s — `pm8941_pwrkey` IRQ 0→1 and `PM: suspend exit` at 16 s, well before the +300 s fallback alarm. Button wake through PON→SPMI→MPM→GIC works.
+
+Still open: the gadget-link rebind question (EUD off vs on), decoding the leftover vote bits, audio-PD bring-up and GPU resume (needed before dropping the flags).
 
 
 ## Bluetooth audio (2026-10-31)
