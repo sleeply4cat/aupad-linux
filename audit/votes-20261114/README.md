@@ -58,6 +58,33 @@
   вчерашнего заклинивания — recovery после этого краша + UFS-столл.
 - vmin append-блок всегда 0x0.
 
+## День 2+: сравнение со стоковым Android (2026-11-15)
+
+Путь: misc→qmmi (RAM-бут bcbclr, авто-ребут), Android 15 / msm-5.15.170-android13,
+slot b, adb через Magisk su. Возврат: su-dd boot-recovery в misc (bcb.bin подход,
+бэкап в misc-backup-20261115.bin).
+
+**Главный вывод — сток на паритете с нашим портом, «vlow-блокер» это продукт, а не
+дефект порта:**
+- `qcom_sleep_stats`: **vlow Count = 0, vmin Count = 0 на стоке** (так же, как у нас);
+  apss Count 1.14M (кластерные шатдауны), adsp 15728, modem 824.
+- `rpm_master_stats`: **APSS xo_count = 0x0 на стоке** (MPSS xo_count 0x39b) — APSS
+  никогда не гасит XO и на стоке. Этап D плана (vmin/vlow > 0) закрывается как N/A:
+  сток этого не делает.
+- `mem_sleep = [s2idle]` на стоке — тот же режим.
+- **Стоковый suspend тоже сорвался**: `echo mem > /sys/power/state` →
+  `last_failed_dev 4e00000.ssusb, errno -16 (EBUSY), step suspend` при активной
+  adb-сессии. Наш pmOS засыпает с активным NCM-гаджетом и просыпается по RTC.
+  Т.е. наш suspend по факту лучше стокового в этом сценарии.
+- Стоковый rpm_stats: vlow Client_votes = 0x0 — append-блок не пишется вовсе (у нас
+  он пишется: 0x81 во сне). Измеряемая «карта голосов» у нас ЕСТЬ, у стока нет.
+- EUD под Android: хаб исчез — ABL/Android гасят mode_mgr2, стаб (recovery_b) при
+  обычной загрузке в boot_b не запускается. Консоли под Android нет, всё через adb.
+
+Следствие для работ: часы в vlow/vmin не цель — цель сравнение ватт в suspend
+(energy_now до/после, сток vs pmOS) и вход RPM-Assisted-шатдауна. Карта битов —
+академический интерес для апстрима (агент всё ещё ищет downstream-расшифровку).
+
 ## Следующий шаг
 
 Повторить noirq-снапшот, предварительно очистив консольный спам, или добавить
