@@ -270,7 +270,21 @@ Remaining from the test order: ~~suspend with the cable out~~, ~~power-button wa
 - **Cable-out cycle** (60 s freeze, flags on): RTC alarm woke it after 62 s; `vlow`/`vmin` **still 0 without the cable** — USB is not the vlow blocker; the APSS-side suspects stand. Post-wake Client Votes `0x87838783` vs idle `0x87858785` (the cable's own bit drops out). Replugging after resume does not bring the gadget link back — same unbind/bind needed.
 - **Power-button wake**: froze, pressed the button after ~16 s — `pm8941_pwrkey` IRQ 0→1 and `PM: suspend exit` at 16 s, well before the +300 s fallback alarm. Button wake through PON→SPMI→MPM→GIC works.
 
-Still open: the gadget-link rebind question (EUD off vs on), decoding the leftover vote bits, audio-PD bring-up and GPU resume (needed before dropping the flags).
+Still open: decoding the leftover vote bits, audio-PD bring-up and GPU resume (needed before dropping the flags). The gadget-link question was closed the next day — below.
+
+
+### Power follow-up (2026-11-14: EUD-off experiment; user suspend works)
+
+**The EUD hypothesis is disproved — EUD is not the link blocker, it is what keeps the PHY alive.**
+
+- The stub enables the EUD on every boot exactly like stock `eud.ko` (`stub/main.c`): a TCSR write over the SCM, `CTLOUT (0x1611014) = 1`, and **`mode_mgr2 (0x1612000) = 1` over the SCM**. That register survives warm reboots, crash reboots and "power off"; only an SCM write turns it off. A plain Linux write to `0x1612000` is a non-secure access to a secure register and **panics the kernel on the spot** — confirmed twice (once from `/dev/mem` python on a live link, once from an initramfs poke; the second made a `panic=10` boot loop, recovered without hands: eudlog attached, space-spam stopped U-Boot's autoboot over the EUD COM, `run fastboot`, `fastboot boot` a good image, restore `/boot/boot.img` from `boot.old`). The old `poke 0x1611014 0` recipe only flips the stub's warm/cold detection (`eud_was_on`), not the mux.
+- `build/tests/eudoff.c` (out-of-tree module, `qcom_scm_io_writel(mode_mgr2, 0)` + `CTLOUT = 0`): the sanctioned runtime disable. Works: the EUD hub leaves the host bus, the gadget re-enumerates direct, link `configured`, freeze on schedule, RTC-exact wake (`PM: suspend exit`, wlan re-associates) — **and the box dies within ~2 s of resume**, before the first UDC poll. With the PHY really powered down by `phy_exit`, its re-init hangs the system. So: with EUD on, suspend survives but the link needs a rebind; with EUD off, suspend doesn't survive resume at all. The femto-PHY power-cycle joins audio-PD and GPU-resume on the bring-up list; **EUD stays on**.
+- **User suspend now works end to end** (stage H closed). What was wrong:
+  - `/etc/elogind/sleep.conf.d/50-aupad-nosuspend.conf` (2026-10-31, "suspend is untested") — superseded by `build/pmos/aupad-sleep.conf`, installed by mkrootfs as `/etc/elogind/sleep.conf.d/50-aupad.conf` (`AllowSuspend=yes`; hibernation stays off).
+  - **elogind calls system-sleep hooks with `("pre"|"post")` and the verb** — `post suspend`, never `post resume`. A `post/resume)` case matches nothing and silently does no work; caught by phase logging in `/var/log/aupad-sleep.log` (post "began" and "ended" in the same second).
+  - The post phase rebinds `4ef8800.usb` unconditionally: a "configured" UDC can sit on a dead host-side link (observed: resume clean, wlan back, UDC `configured`, host sees no device). Each sysfs write goes through a child shell — an unbind write has taken a SIGBUS in the writing process once (el0 sync trace).
+  - Measured full cycle: `pre` 1–2 s (services down) → freeze → RTC-exact wake → `post` 5 s (`rebind done, udc configured`) → SSH alive, ping gap only during sleep.
+
 
 
 ## Bluetooth audio (2026-10-31)

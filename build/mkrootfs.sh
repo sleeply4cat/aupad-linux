@@ -34,6 +34,8 @@ cp ../tests/flash.sh root/usr/sbin/flash
 mkdir -p root/etc/elogind/system-sleep
 cp aupad-system-sleep.sh root/etc/elogind/system-sleep/aupad.sh
 chmod 0755 root/etc/elogind/system-sleep/aupad.sh
+mkdir -p root/etc/elogind/sleep.conf.d
+cp aupad-sleep.conf root/etc/elogind/sleep.conf.d/50-aupad.conf
 mkdir -p root/lib/firmware/qcom
 cp ../../firmware/a630_sqe.fw ../../firmware/a610_zap.mdt ../../firmware/a610_zap.b0? root/lib/firmware/qcom/
 rm -f "$OUT"

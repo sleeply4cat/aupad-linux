@@ -6,6 +6,7 @@ dir /sys 0755 0 0
 dir /tmp 1777 0 0
 dir /mnt 0755 0 0
 file /bin/busybox ${AUPAD_BUILD}/initramfs/busybox 0755 0 0
+file /bin/poke ${AUPAD_BUILD}/tests/poke 0755 0 0
 file /init ${AUPAD_BUILD}/initramfs/init 0755 0 0
 file /bin/rx ${AUPAD_BUILD}/tests/rx 0755 0 0
 file /bin/rb ${AUPAD_BUILD}/tests/rb 0755 0 0
