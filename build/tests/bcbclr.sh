@@ -9,3 +9,5 @@ dd if=/bin/misc.head of=$p bs=32 count=1 conv=fsync,notrunc 2>&1 | tail -1
 blockdev --flushbufs $p
 echo 3 > /proc/sys/vm/drop_caches
 [ "$(head -c 32 $p | md5sum | cut -d' ' -f1)" = "$(md5sum /bin/misc.head | cut -d' ' -f1)" ] && echo "BCB RESTORED" || echo "BCB RESTORE FAILED"
+# bcbreboot on the cmdline: hand straight back to ABL, which now boots Android.
+grep -q bcbreboot /proc/cmdline && { sync; echo "rebooting to the restored command"; reboot -f; }
