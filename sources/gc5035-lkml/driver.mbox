@@ -1,0 +1,148 @@
+From patchwork Mon Oct 12 14:34:37 2026
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+X-Patchwork-Submitter: Nicola Fiorillo <nicfio@gmail.com>
+X-Patchwork-Id: 165049
+Received: from tor.lore.kernel.org ([172.105.105.114])
+	by linuxtv.org with esmtps  (TLS1.3) tls
+ TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+	(Exim 4.96)
+	(envelope-from
+ <linux-media+bounces-77468-patchwork=linuxtv.org@vger.kernel.org>)
+	id 1xGHD7-0007KF-1K
+	for patchwork@linuxtv.org;
+	Mon, 12 Oct 2026 14:41:06 +0000
+Received: from smtp.subspace.kernel.org (conduit.subspace.kernel.org
+ [100.90.174.1])
+	by tor.lore.kernel.org (Postfix) with ESMTP id E1F152FA13
+	for <patchwork@linuxtv.org>; Mon, 12 Oct 2026 14:35:45 +0000 (UTC)
+Received: from localhost.localdomain (localhost.localdomain [127.0.0.1])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 8718048F000;
+	Mon, 12 Oct 2026 14:35:34 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com
+ header.b="YEb5yFab"
+X-Original-To: linux-media@vger.kernel.org
+Received: from mail-wr1-f51.google.com (mail-wr1-f51.google.com
+ [209.85.221.51])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 18A2348F00E
+	for <linux-media@vger.kernel.org>; Mon, 12 Oct 2026 14:35:30 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org;
+ arc=none smtp.client-ip=209.85.221.51
+ARC-Seal: i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1791815734; cv=none;
+ b=o8M56cm6QIniNfQcGd0xgogXFCfaBuLsvS+Q/51SFjm2Z1NpSuk053/KRnjjTaTnbDCbaTjk+Em3jE+whvER5JJj8EFVQvczLeqqF2v5QQ1+Bc9ZRfd4iYwNdC/yoG3SKRggwSZgW4Dog9cSdP63QrgO2ORKxL2mRjk8ctGIlnY=
+ARC-Message-Signature: i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1791815734; c=relaxed/simple;
+	bh=2qOJ9Tb7eTNu+UDigTIiUwuLhMDmt7cKRNehwRi77rM=;
+	h=From:To:Cc:Subject:Date:Message-ID:In-Reply-To:References:
+	 MIME-Version;
+ b=EIzZXYsqDn6QHE8vK8CJTLay2Mktvk0dPm5owSJU3DCWvsifsQyXaLCjs1ZpnEoFVZ65PaLLp0Zpz6fWm2BC9GGZDf0MgJ19IyJgLKzdZK4L8PkjUIUZkDma33S8H1No7sw2EiF/8VPcmFMCtIWfczgBLXU6qVEE9BrwCYppkuw=
+ARC-Authentication-Results: i=1; smtp.subspace.kernel.org;
+ dmarc=pass (p=none dis=none) header.from=gmail.com;
+ spf=pass smtp.mailfrom=gmail.com;
+ dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com
+ header.b=YEb5yFab; arc=none smtp.client-ip=209.85.221.51
+Authentication-Results: smtp.subspace.kernel.org;
+ dmarc=pass (p=none dis=none) header.from=gmail.com
+Authentication-Results: smtp.subspace.kernel.org;
+ spf=pass smtp.mailfrom=gmail.com
+Received: by mail-wr1-f51.google.com with SMTP id
+ ffacd0b85a97d-48dc202a60eso611194f8f.3
+        for <linux-media@vger.kernel.org>;
+ Mon, 12 Oct 2026 07:35:30 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20251104; t=1791815729; x=1792420529;
+ darn=vger.kernel.org;
+        h=content-transfer-encoding:mime-version:references:in-reply-to
+         :message-id:date:subject:cc:to:from:from:to:cc:subject:date
+         :message-id:reply-to:content-type;
+        bh=T5o86qRKa+y+2L/vs0Gz7VTK12N9LUMH4BjEHIFRf94=;
+        b=YEb5yFabnHeKCN5H5//X8BkxM4/voFG2BW9AfSTDhIFzv8LSNsab4nbbgihqUUMtCl
+         80fmRkDlB7dgrXcRQ4SJBNQKsk+zCHRF45aqQ8blbFCMebTKyLQnYQUmCznTV2HUY5y3
+         Ifbwp9SJxTOE56EAO5cGn/CDhbBT4jP5TBEULDfcENBw+PfXym/XElYZ21dro36WA0VG
+         a0+a5X6d4a9HaDtSvepeKFGRdTVhQg6cd80hKcYX9PCAI0LygDw4CLofOTdZbuQfWGMj
+         SNOqquUV58aft7ovRb4GelJ44Nazy01VF/TXc+o5P5c+S/rW7e90W7xnATIiGkaQlwU/
+         MOJQ==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20260707; t=1791815729; x=1792420529;
+        h=content-transfer-encoding:mime-version:references:in-reply-to
+         :message-id:date:subject:cc:to:from:x-gm-gg:x-gm-message-state:from
+         :to:cc:subject:date:message-id:reply-to:content-type;
+        bh=T5o86qRKa+y+2L/vs0Gz7VTK12N9LUMH4BjEHIFRf94=;
+        b=0c/Qc40ojeyRv0XoDmtvaSBWeS26Mc/DA4DhjJfD7jBuerKsZz+ahZo9OvbWtH38pf
+         fyweeg7x61WuEMxoSGuO/JSrBvqe37Ah5vyj2jTcYDGbt4CJIGh9XF8dTzjsawDu+VlN
+         xySHMwprUIRT7aKV2kAOmHG44Tayyn3y8F/zpsJrZCe3FAyAAQUALpVmOC+tlLTWh2eT
+         eyWy3jLHbdP9a8NiB3CrWuhSMw//Jo0FiuSvOEC8RCBEgcgr+10Ikm+YgcYXZqbClrYW
+         yzznp/ByAeyMniqdYSsecYFlScWbhVH3smC42GaDXnWwy690QIkMZlpJXRznZ/yCxAlR
+         OblQ==
+X-Forwarded-Encrypted: i=1;
+ AKwUvByhnmusMWdNdwfJ4tnKGgUh5/gXLQn+53xzBzisNH8b8UWwBLvCTXtrtiRt6pLc8zAVKQm70x6Ets+Cvg==@vger.kernel.org
+X-Gm-Message-State: AFq9FYLv/YcxcksFpQlqx2uVZUolmzbUlDxKUS/aO9F5ovxkhVFTFmsW
+	LyuRWS6k1MxfdK3WEdkNM0qHsK7v4C04vfURFPqZ/sGs/TRQrkS5wY/+
+X-Gm-Gg: AYBFou2cNd9O6hpB/nbNm9mBma3fmMiUTSUfSflwHR5SHwmrFk37SS1ycP0hpRTMmj4
+	9Pc4PrlYmBhjwL+leZN7dQmBMERIeII4xJgsOQkQ12C7oycYLg2ahy+6ho6zTFRyImEYYCa47uk
+	CRagAQk1PpuzbTsC1tq33/T14vTUfdrfYcS6O0Qpw5zAtzReN7d+xHWYyQBbNBcSxWK/SlspiC4
+	bzVQJ4lSL7mBaTfHqVID2hGsge/9pq/dJYgEbH3UVbLEy7A4dr2pBif7BgvuSS+B0/5FA1NA2nI
+	3ScmKfeuzKHbeJtMVlVSYm07Fq/17mYty2KA60vikROV+bBWuulWf8108f751Zi3kwYlQzEJt3f
+	cqo+a5JVMu6GVizSUG6+6wXMkT7wmkysrSPmWVK/mKlv8A7dljgQ4uNFfAYU3mMOK5NfaMqzYAn
+	W5QZXfHaBkQ04XbFLFkAPrNMFrmAT6OBnsMYHW7LRKvH6J+Nfsp94jWlBYJ7AR9SexrvIi9qXRy
+	6mBtRuclzZhtZfWF/kkGGPdFdQRyaHwHRbplgj7flfR+CAqTFi56GuwTJCWXd3WkgN3RXuclCF1
+	+rMaDdO5xnfTAwLRQxRA0XB8j7gEkOwwQ8Bha2v+aLceo1UeL3WQs663bTpqVlIANGHC2Vw/Wo5
+	ikPg9Kq5biUPNffzBFl6hJ+wcwIjrdhDd2SKFkdoX1RIDP0l4zk8RkQ==
+X-Received: by 2002:adf:e6c4:0:b0:48c:69b3:610f with SMTP id
+ ffacd0b85a97d-48dbaae5bdcmr13350730f8f.26.1791815728833;
+        Mon, 12 Oct 2026 07:35:28 -0700 (PDT)
+Received: from localhost.localdomain
+ (host-95-239-230-248.retail.telecomitalia.it. [95.239.230.248])
+        by smtp.gmail.com with ESMTPSA id
+ ffacd0b85a97d-48db94e33d2sm20899559f8f.9.2026.10.12.07.35.27
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Mon, 12 Oct 2026 07:35:27 -0700 (PDT)
+From: Nicola Fiorillo <nicfio@gmail.com>
+To: Laurent Pinchart <laurent.pinchart@ideasonboard.com>,
+	Sakari Ailus <sakari.ailus@linux.intel.com>
+Cc: Mauro Carvalho Chehab <mchehab@kernel.org>,
+ Hans Verkuil <hverkuil@kernel.org>, Dan Scally <dan.scally@ideasonboard.com>,
+ Hans de Goede <hansg@kernel.org>,
+ =?utf-8?q?Uwe_Kleine-K=C3=B6nig?= <u.kleine-koenig@baylibre.com>,
+ linux-media@vger.kernel.org, linux-kernel@vger.kernel.org
+Subject: [PATCH v2 1/7] media: i2c: Add GC5035 image sensor driver
+Date: Mon, 12 Oct 2026 16:34:37 +0200
+Message-ID: <20261012143443.34897-2-nicfio@gmail.com>
+X-Mailer: git-send-email 2.47.3
+In-Reply-To: <20261012143443.34897-1-nicfio@gmail.com>
+References: <20261009072733.39877-1-nicfio@gmail.com>
+ <20261012143443.34897-1-nicfio@gmail.com>
+Precedence: bulk
+X-Mailing-List: linux-media@vger.kernel.org
+List-Id: <linux-media.vger.kernel.org>
+List-Subscribe: <mailto:linux-media+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-media+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+X-LSpam-Score: -3.3 (---)
+X-LSpam-Report: No,
+ score=-3.3 required=5.0
+ tests=ARC_SIGNED=0.001,ARC_VALID=-0.1,BAYES_00=-1.9,DKIM_SIGNED=0.1,DKIM_VALID=-0.1,DKIM_VALID_AU=-0.1,DMARC_PASS=-0.001,FORGED_GMAIL_RCVD=1,FREEMAIL_FORGED_FROMDOMAIN=1,FREEMAIL_FROM=0.001,HEADER_FROM_DIFFERENT_DOMAINS=0.5,MAILING_LIST_MULTI=-1,PDS_OTHER_BAD_TLD=1,RCVD_IN_VALIDITY_CERTIFIED=-3,RCVD_IN_VALIDITY_RPBL=1.31,RCVD_IN_VALIDITY_SAFE=-2,SPF_HELO_NONE=0.001,SPF_PASS=-0.001
+ autolearn=ham autolearn_force=no
+
+Add a driver for the GalaxyCore GC5035, a 5 Mpixel raw Bayer sensor with
+a two lane MIPI CSI-2 interface. The driver supports the exposure,
+analogue gain, vertical blanking and test pattern controls, and outputs
+2592x1944 RAW10.
+
+I don't have a datasheet for the sensor. The initialisation sequence comes
+from the Alder Lake-M driver in intel/ipu6-drivers, which derives from the
+ChromeOS driver posted in 2020. The readout window and the output crop are
+not part of the sequence: they are computed from the crop rectangle, in
+the coordinates of the largest area measured to give image data
+(2608x1964). The driver reports that area as the native size and the crop
+bounds; it is not the physical pixel array. The default crop rectangle
+gives the same image as the vendor sequence. The frame period,
+(height + vblank) * 2920 / 168.96 MHz, matches the measurements.
+
+Assisted-by: claude-opus-5-5 coccinelle sparse smatch
+Signed-off-by: Nicola Fiorillo <nicfio@gmail.com>

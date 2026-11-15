@@ -10,9 +10,18 @@ __pycache__/
 /build/*.img
 /build/initramfs.cpio.gz
 /build/initramfs/busybox
-/build/tests/rx
-/build/tests/rb
-/build/tests/authorized_keys
+/tools/devicetests/rx
+/tools/devicetests/rb
+/tools/devicetests/authorized_keys
+# out-of-tree module and tool build artifacts
+/tools/devicetests/*.o
+/tools/devicetests/*.ko
+/tools/devicetests/*.mod
+/tools/devicetests/*.mod.c
+/tools/devicetests/.*.cmd
+/tools/devicetests/Module.symvers
+/tools/devicetests/modules.order
+/tools/devicetests/poke
 /build/pmos/cache/
 /build/pmos/dl/
 /build/pmos/keys/
@@ -21,6 +30,12 @@ __pycache__/
 /firmware/
 /logs/
 /src/
+# downloaded tarballs and archives, kept out of git on purpose
+/build/downloads/
+# machine-specific EDL client config
+/edl_config.json
+# session plans of the coding agent
+/.zcode/
 stub/*.o
 stub/*.elf
 stub/*.bin

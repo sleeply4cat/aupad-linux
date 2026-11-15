@@ -85,7 +85,7 @@ The pmOS signing key came from the `postmarketos-keys` package on the mirror (tr
 the index signature, not checked against a second source). Only local-install, no network on the tablet: new
 packages mean adding them to `PKGS` and rerunning, or copying apks over.
 
-Access: `ssh root@172.16.42.1` (your public key from `build/tests/authorized_keys`), UART and ttyGS0 are passwordless root
+Access: `ssh root@172.16.42.1` (your public key from `tools/devicetests/authorized_keys`), UART and ttyGS0 are passwordless root
 shells. tty1 asks for login and root has no password, which is moot without a keyboard.
 
 - `unudhcpd` must run or NetworkManager drops the interface, link-local included, after 45 s without a lease. It
@@ -248,7 +248,7 @@ s2idle (`rtcwake -d rtc0 -m freeze -s 15`, `qcom_stats` loaded) completes only w
 
 ### Power fixes landed (2026-11-13; hardware-tested same day)
 
-Full analysis and staged plan: `audit/Энергосбережение_исследование.md`. Landed this session:
+Full analysis and staged plan: `archive/Энергосбережение_исследование.md` (theses in `docs/RESEARCH.md`). Landed this session:
 
 - **0040 `dwc3-qcom`: UTMI PIPE clock restored on resume.** Backport of the upstream fix (Falezza, 2026-10-27, patchew 20261027-dwc3-utmi-resume): the glue only programmed QSCRATCH GENERAL_CFG in probe, CX collapse during s2idle drops it, and the gadget dies with `failed to enable ep0out` — our exact symptom, including the preceding `HS-PHY not in L2`.
 - **0044 `dwc3-qcom-legacy`: the same fix, mirrored.** First hardware run showed the AuPad's `usb@4ef8800` binds **dwc3-qcom-legacy** (`"qcom,sm6115-dwc3", "qcom,dwc3"`), which 0040 doesn't touch — the upstream author knowingly left the legacy glue alone. Hardware result after 0044: `failed to enable ep0out` is gone from resume, the controller survives, but the gadget link still stays `not attached` after resume and needs `unbind`/`bind` of `4ef8800.usb` to reconnect (then it's `configured` and ssh works). Suspect: with EUD enabled our femto-PHY patch 0029 keeps the PHY out of dwc3's hands; upstream tested with EUD off. Open.
@@ -278,7 +278,7 @@ Still open: decoding the leftover vote bits, audio-PD bring-up and GPU resume (n
 **The EUD hypothesis is disproved — EUD is not the link blocker, it is what keeps the PHY alive.**
 
 - The stub enables the EUD on every boot exactly like stock `eud.ko` (`stub/main.c`): a TCSR write over the SCM, `CTLOUT (0x1611014) = 1`, and **`mode_mgr2 (0x1612000) = 1` over the SCM**. That register survives warm reboots, crash reboots and "power off"; only an SCM write turns it off. A plain Linux write to `0x1612000` is a non-secure access to a secure register and **panics the kernel on the spot** — confirmed twice (once from `/dev/mem` python on a live link, once from an initramfs poke; the second made a `panic=10` boot loop, recovered without hands: eudlog attached, space-spam stopped U-Boot's autoboot over the EUD COM, `run fastboot`, `fastboot boot` a good image, restore `/boot/boot.img` from `boot.old`). The old `poke 0x1611014 0` recipe only flips the stub's warm/cold detection (`eud_was_on`), not the mux.
-- `build/tests/eudoff.c` (out-of-tree module, `qcom_scm_io_writel(mode_mgr2, 0)` + `CTLOUT = 0`): the sanctioned runtime disable. Works: the EUD hub leaves the host bus, the gadget re-enumerates direct, link `configured`, freeze on schedule, RTC-exact wake (`PM: suspend exit`, wlan re-associates) — **and the box dies within ~2 s of resume**, before the first UDC poll. With the PHY really powered down by `phy_exit`, its re-init hangs the system. So: with EUD on, suspend survives but the link needs a rebind; with EUD off, suspend doesn't survive resume at all. The femto-PHY power-cycle joins audio-PD and GPU-resume on the bring-up list; **EUD stays on**.
+- `tools/devicetests/eudoff.c` (out-of-tree module, `qcom_scm_io_writel(mode_mgr2, 0)` + `CTLOUT = 0`): the sanctioned runtime disable. Works: the EUD hub leaves the host bus, the gadget re-enumerates direct, link `configured`, freeze on schedule, RTC-exact wake (`PM: suspend exit`, wlan re-associates) — **and the box dies within ~2 s of resume**, before the first UDC poll. With the PHY really powered down by `phy_exit`, its re-init hangs the system. So: with EUD on, suspend survives but the link needs a rebind; with EUD off, suspend doesn't survive resume at all. The femto-PHY power-cycle joins audio-PD and GPU-resume on the bring-up list; **EUD stays on**.
 - **User suspend now works end to end** (stage H closed). What was wrong:
   - `/etc/elogind/sleep.conf.d/50-aupad-nosuspend.conf` (2026-10-31, "suspend is untested") — superseded by `build/pmos/aupad-sleep.conf`, installed by mkrootfs as `/etc/elogind/sleep.conf.d/50-aupad.conf` (`AllowSuspend=yes`; hibernation stays off).
   - **elogind calls system-sleep hooks with `("pre"|"post")` and the verb** — `post suspend`, never `post resume`. A `post/resume)` case matches nothing and silently does no work; caught by phase logging in `/var/log/aupad-sleep.log` (post "began" and "ended" in the same second).
@@ -287,7 +287,7 @@ Still open: decoding the leftover vote bits, audio-PD bring-up and GPU resume (n
 
 ### Power day 3 (2026-11-15: votes decode, stock parity, the handoff test)
 
-Full report chain: `audit/votes-20261114/` (README — method + day-2 table, BYTES.md —
+Full report chain: `archive/votes-20261114/` (README — method + day-2 table, BYTES.md —
 byte decomposition, DOWNSTREAM-DECODE.md — the agent's research, misc backup).
 
 - **Stock Android 15 (msm-5.15) is at full suspend parity with the port**: booted through
@@ -342,7 +342,7 @@ takes ~2 min — ssh loops that give up earlier look like dead boots.
 `qcom_smb5` (the pm7250b charger, already probing as `pm7250b-charger`) had only
 online/status; the register map was verified against the downstream smb5-reg.h of
 the same silicon (Xiaomi spes tree, fetched by the agent; copies in
-`audit/charger/`) and the stock dtbo (SMB5 block layout, `auto-recharge-soc=98%`
+`sources/smb5-downstream/`) and the stock dtbo (SMB5 block layout, `auto-recharge-soc=98%`
 explains the old "status=Full at 98%").
 
 - **0046 `qcom_smb5`: charge control** (linux `4f00680fb`): new properties on the
@@ -497,7 +497,7 @@ Chain: ABL -> recovery_b = `stub` (arms 120 s APSS watchdog) + U-Boot -> `fastbo
   Use it to update U-Boot: `PAYLOAD=build/uboot/u-boot-nodtb.bin EXTRA=-DSTUB_WDT=120 stub/mkstub.sh build/boot-ub.img`.
 - **misc holds `boot-recovery` in its first 32 bytes**, so every plain reboot goes to U-Boot, and **Android does
   not boot until it is cleared**. `ub.sh build/boot-bcbclr.img` puts back the original (`qmmi`, from
-  `build/tests/misc.head`; tested). Don't zero it. To set it again: write `build/bcb.bin` from Android.
+  `tools/devicetests/misc.head`; tested). Don't zero it. To set it again: write `build/bcb.bin` from Android.
 - ABL ignores volume keys for boot selection: VOL+ and VOL- give `KeyPress:1/2` but `Recovery:0`, `Fastboot=0`.
   `rb recovery` from mainline works (PON spare, one-shot) through `pm6125.dtsi`.
 - Watchdog: the reset comes about 9.6 s after the timeout, then ramdump. U-Boot autostarts it (30 s) and
@@ -618,7 +618,7 @@ Adreno 610 v2, stock chipid 0x6010001, runs as `qcom,adreno-610.0` (0x6010000), 
   The DDR vote nearly doubled the score at 320 MHz: 2.72 to 5.15 fps. Fuse is elsewhere on khaje, nvmem cell deleted.
 - **MX is not voted.** Stock votes vdd_mx by PLL VCO rate (nominal above 2400 MHz VCO, so for 1260 MHz). Mainline's
   GPU node has CX only. No corruption showed up, but that is a gap, not proof it's unnecessary.
-- `tools/gpustress` compares each frame's hash against a reference, `build/tests/gpusweep.sh` pins each OPP. Result: 7
+- `tools/gpustress` compares each frame's hash against a reference, `tools/devicetests/gpusweep.sh` pins each OPP. Result: 7
   rates clean, 3-minute soak at 1260 MHz, 2174 frames checked, 0 bad, 44 C peak, 12.1 fps. Mostly a CPU readback test
   above 785 MHz, not a pure GPU score. `msm` wait-boost raises the rate during fence waits, so userspace pinning below
   about 1 GHz doesn't hold: cur_freq shows more than the pin. Not a bug.
@@ -642,7 +642,7 @@ Adreno 610 v2, stock chipid 0x6010001, runs as `qcom,adreno-610.0` (0x6010000), 
 ## Tools
 
 - `build/ub.sh <img> [secs]`: the normal loop, see Android-free loop.
-- `test=<name>` on the cmdline runs `/bin/t-<name>` from the initramfs (`build/tests/`).
+- `test=<name>` on the cmdline runs `/bin/t-<name>` from the initramfs (`tools/devicetests/`).
 - The UART link queues. A flood of characters reaches U-Boot late and aborts fastboot with `Operation aborted.`; `tools/ubstop.py` is paced for this. Send commands one character at a time.
 - A test must never end parked: nothing but a person on the power button gets a parked CPU back.
 

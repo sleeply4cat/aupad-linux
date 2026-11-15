@@ -33,7 +33,7 @@ gadget() {
 for i in 1 2 3 4 5; do [ -n "$(ls /sys/class/udc 2>/dev/null)" ] && break; sleep 1; done
 gadget
 
-# test=<name> on the cmdline runs /bin/t-<name> (built from build/tests/) before the shell
+# test=<name> on the cmdline runs /bin/t-<name> (built from tools/devicetests/) before the shell
 T=$(sed -n 's/.*test=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -n "$T" ] && [ -x /bin/t-$T ]; then
     echo "TESTSTART $T" > /dev/kmsg

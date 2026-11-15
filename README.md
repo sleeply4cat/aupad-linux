@@ -56,8 +56,13 @@ has no driver and relies on the bootloader. See [docs/PORT.md](docs/PORT.md) for
 | `stub/` | Pre-U-Boot stub: arms the watchdog, sets up the UART, jumps to the payload |
 | `build/` | Boot image, rootfs and test-loop scripts, initramfs, audio topology source and UCM profile, camera config |
 | `tools/ocd/` | JTAG/SWD debugging over USB with Qualcomm EUD: OpenOCD config and driver patch, `g kernel`, `g rpm` |
-| `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy, UART recorder, ramdump capture |
+| `tools/` | Clock driver generators, GPU tests, register peek/poke, test patterns, USB-only package proxy, UART recorder, ramdump capture; `tools/devicetests/` holds the device-side utilities (out-of-tree kernel modules, initramfs helpers, on-tablet scripts) |
+| `sources/` | Reference sources the port derives from: downstream SMB5 charger for the same PMIC (register-map ground truth), vendor 5.4 EDL/reboot helpers, GC5035 LKML series |
+| `archive/` | Full texts of closed research and session artifacts; each topic's takeaways live in `docs/RESEARCH.md` |
+| `audit/` | Plans of tasks not yet implemented (bootloader unlock track, repository organization) |
 | `docs/PORT.md` | Engineering notes |
+| `docs/RESEARCH.md` | Research theses, one section per closed topic (Russian) |
+| `docs/TOOLS.md` | Index of every utility in `tools/` and `build/`, with superseded marks |
 
 No firmware, dumps or stock binaries are included. You need these from your own device or public sources:
 GPU firmware `a630_sqe.fw` and `a610_zap.*` from `/vendor/firmware` into `firmware/`, and a static aarch64 busybox as
@@ -93,9 +98,9 @@ make O=../build/out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 make O=../build/out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image modules qcom/sm6225-chuwi-aupad.dtb
 cd ..
 
-aarch64-linux-gnu-gcc -O2 -static -o build/tests/rx build/tests/rx.c
-aarch64-linux-gnu-gcc -O2 -static -o build/tests/rb build/tests/rb.c
-cat ~/.ssh/id_ed25519.pub > build/tests/authorized_keys
+aarch64-linux-gnu-gcc -O2 -static -o tools/devicetests/rx tools/devicetests/rx.c
+aarch64-linux-gnu-gcc -O2 -static -o tools/devicetests/rb tools/devicetests/rb.c
+cat ~/.ssh/id_ed25519.pub > tools/devicetests/authorized_keys
 
 CMDLINE="earlycon=qcom_geni,0x4a90000 console=ttyMSM0,115200n8 ignore_loglevel \
 clk_ignore_unused pd_ignore_unused rdinit=/init panic=10 root=pmos" build/mkboot.sh build/boot-pmos.img

@@ -1,6 +1,6 @@
 #!/bin/bash
 # RAM-boot an image through U-Boot, with no flashing and no Android: ub.sh <image> [max_seconds]
-# Needs U-Boot in recovery_b and boot-recovery in misc.  Same verdicts as run.sh.
+# Needs U-Boot in recovery_b and boot-recovery in misc.  Verdicts print step by step.
 set -u
 cd "$(dirname "$0")/.."
 IMG=$1; MAX=${2:-120}
