@@ -285,6 +285,48 @@ Still open: decoding the leftover vote bits, audio-PD bring-up and GPU resume (n
   - The post phase rebinds `4ef8800.usb` unconditionally: a "configured" UDC can sit on a dead host-side link (observed: resume clean, wlan back, UDC `configured`, host sees no device). Each sysfs write goes through a child shell — an unbind write has taken a SIGBUS in the writing process once (el0 sync trace).
   - Measured full cycle: `pre` 1–2 s (services down) → freeze → RTC-exact wake → `post` 5 s (`rebind done, udc configured`) → SSH alive, ping gap only during sleep.
 
+### Power day 3 (2026-11-15: votes decode, stock parity, the handoff test)
+
+Full report chain: `audit/votes-20261114/` (README — method + day-2 table, BYTES.md —
+byte decomposition, DOWNSTREAM-DECODE.md — the agent's research, misc backup).
+
+- **Stock Android 15 (msm-5.15) is at full suspend parity with the port**: booted through
+  the restored `qmmi` misc command (RAM-boot `boot-bcbclr.img`; `bcbclr.sh` now auto-reboots
+  with `bcbreboot` on the cmdline). Measured with adb + Magisk su (`adb root` refused,
+  production build): `qcom_sleep_stats` **vlow/vmin Count = 0**, `rpm_master_stats`
+  **APSS xo_count = 0** (MPSS 0x39b), `mem_sleep=[s2idle]` — the "vlow blocker" is product
+  behavior, not a port defect (stage D closed as N/A). Stock's own `echo mem > state`
+  failed with `4e00000.ssusb EBUSY` while adb was active — our pmOS suspends with a live
+  NCM gadget and RTC-wakes. Stock never writes the vlow votes block at all (0x0); ours
+  does (0x81 in true sleep). Return path: push the misc backup, `su -c dd` it to
+  `/dev/block/bootdevice/by-name/misc`, `adb reboot` — no EDL needed. EUD dies under
+  Android (the stub doesn't run on the boot_b path and ABL/Android clear mode_mgr2) —
+  adb only, no console.
+- **Votes semantics** (no public table exists — the decode lives in the closed rpm_proc;
+  Maulik Shah, QTI, on LKML for qcm2290): each byte of `Client Votes` is xo-clock votes
+  of a subsystem (4-byte history; TZ covered by APSS); bit 7 is a validity marker, never
+  a blocker; bits 0–2 accumulate as blockers. vlow == XO off SoC-wide; vmin adds rail
+  minimization; entry needs all subsystems power-down + clean sleep votes + enough sleep
+  time. Our 0x81 floor = one group (APSS side) holding an xo vote — the same signature
+  the SM6115 Pro1-X port fixed (vmin 85% of sleep, 35–40 mA after their series).
+- **0045 `clk: qcom: smd-rpm: skip the clock handoff votes on sm6115/qcm2290`** (linux
+  `1afad790b`): `clk_smd_rpm_handoff()` votes INT_MAX into both RPM sets for every clock
+  and nothing clears it — the upstream QCM2290 "skip proxy votes" discussion applies to
+  khaje (our DT binds `rpmcc-sm6115`). Hardware test: clean boot, sound card and all
+  remoteprocs up, hook suspend cycle passes — **but APSS `XO shutdown count` stays 0 and
+  vlow Count stays 0**. The proxy votes were not our blocker: the remaining xo holders
+  are real consumers — the remoteprocs keep running through suspend, and the femto USB
+  PHY keeps its `ref` (bi_tcxo) prepared because the EUD holds it powered (patch 0029).
+  The patch stays (upstream-aligned, harmless, the right bring-up direction); the true
+  XO-off path on this board requires the femto-PHY power-cycle to survive resume (hangs
+  today) and remoteprocs to power down — the same list as before.
+- **Traps from the day**: `make modules_install` streamed its tar onto a rebooting tablet
+  once — the module tree was incomplete at udev coldplug, so remoteprocs, sound and the
+  rest never autoloaded, and everything else (ASoC "no card", missing remoteprocs) looked
+  like a regression from the clock patch. Run `mods.sh` only when the tablet is fully up,
+  never right after `kup.sh` (it reboots). `modprobe` "not found" with all files present
+  = stale `modules.dep` — `depmod -a` on the tablet. kmod 34.2 on pmOS.
+
 
 
 ## Bluetooth audio (2026-10-31)

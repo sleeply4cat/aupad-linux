@@ -1,0 +1,86 @@
+From 1afad790b9122b0a78b9cec6321fb65a56983e01 Mon Sep 17 00:00:00 2001
+From: sleeply4cat <sleeply4cat@gmail.com>
+Date: Sun, 15 Nov 2026 02:56:02 +0300
+Subject: [PATCH] clk: qcom: smd-rpm: skip the clock handoff votes on
+ sm6115/qcm2290
+
+clk_smd_rpm_handoff() votes INT_MAX into both the active and the sleep RPM
+set for every clock at probe, and nothing ever clears it, so clocks with no
+consumer keep the sleep-set votes forever and RPM can never turn the XO off
+(the APSS xo_count stays 0, vlow/vmin never entered).  Mirrors the upstream
+QCM2290 discussion (Imran Shaik, Konrad Dybcio confirming the mechanics):
+only the interconnect clocks need the kickstart between this probe and the
+icc driver, so skip the handoff for the rest.  The AuPad (khaje) binds
+rpmcc-sm6115, and the rpm master stats there show APSS xo_count 0 through
+every suspend, matching the signature.
+
+Hardware: test pending (APSS xo_count + vlow after the change).
+---
+ drivers/clk/qcom/clk-smd-rpm.c | 29 ++++++++++++++++++++---------
+ 1 file changed, 20 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/clk/qcom/clk-smd-rpm.c b/drivers/clk/qcom/clk-smd-rpm.c
+index 487d715ed..7264033f1 100644
+--- a/drivers/clk/qcom/clk-smd-rpm.c
++++ b/drivers/clk/qcom/clk-smd-rpm.c
+@@ -183,6 +183,14 @@ struct rpm_smd_clk_desc {
+ 	const struct clk_smd_rpm ** const icc_clks;
+ 	size_t num_icc_clks;
+ 	bool scaling_before_handover;
++	/*
++	 * Handoff votes INT_MAX into the active and the sleep set for every clock
++	 * and nothing ever tones it down, so unclaimed clocks keep the sleep-set
++	 * votes forever and XO can never shut down (see the QCM2290 discussion,
++	 * https://lkml.iu.edu/2609.2/00948.html).  Only the interconnect clocks
++	 * need the kickstart between this probe and the icc driver's probe.
++	 */
++	bool skip_clks_handoff;
+ };
+ 
+ static DEFINE_MUTEX(rpm_smd_clk_lock);
+@@ -1215,7 +1223,8 @@ static const struct rpm_smd_clk_desc rpm_clk_sm6115 = {
+ 	.clks = sm6115_clks,
+ 	.num_clks = ARRAY_SIZE(sm6115_clks),
+ 	.icc_clks = sm_qnoc_icc_clks,
+-	.num_icc_clks = ARRAY_SIZE(sm_qnoc_icc_clks)
++	.num_icc_clks = ARRAY_SIZE(sm_qnoc_icc_clks),
++	.skip_clks_handoff = true	/* khaje (sm6225) rides this desc too */
+ };
+ 
+ static struct clk_smd_rpm *sm6375_clks[] = {
+@@ -1280,7 +1289,8 @@ static const struct rpm_smd_clk_desc rpm_clk_qcm2290 = {
+ 	.clks = qcm2290_clks,
+ 	.num_clks = ARRAY_SIZE(qcm2290_clks),
+ 	.icc_clks = qcm2290_icc_clks,
+-	.num_icc_clks = ARRAY_SIZE(qcm2290_icc_clks)
++	.num_icc_clks = ARRAY_SIZE(qcm2290_icc_clks),
++	.skip_clks_handoff = true
+ };
+ 
+ static const struct of_device_id rpm_smd_clk_match_table[] = {
+@@ -1358,14 +1368,15 @@ static int rpm_smd_clk_probe(struct platform_device *pdev)
+ 			goto err;
+ 	}
+ 
+-	for (i = 0; i < num_clks; i++) {
+-		if (!rpm_smd_clks[i])
+-			continue;
++	if (!desc->skip_clks_handoff)
++		for (i = 0; i < num_clks; i++) {
++			if (!rpm_smd_clks[i])
++				continue;
+ 
+-		ret = clk_smd_rpm_handoff(rpm_smd_clks[i]);
+-		if (ret)
+-			goto err;
+-	}
++			ret = clk_smd_rpm_handoff(rpm_smd_clks[i]);
++			if (ret)
++				goto err;
++		}
+ 
+ 	for (i = 0; i < desc->num_icc_clks; i++) {
+ 		if (!desc->icc_clks[i])
+-- 
+2.43.0
+
