@@ -337,6 +337,41 @@ prime suspect. `mkboot.sh` default CMDLINE is flagless now; the flags can still
 be added back ad hoc for debugging. Note the full pmOS boot (OpenRC to sshd)
 takes ~2 min — ssh loops that give up earlier look like dead boots.
 
+### Stage G closed (2026-11-15: charge control, 0046/0047)
+
+`qcom_smb5` (the pm7250b charger, already probing as `pm7250b-charger`) had only
+online/status; the register map was verified against the downstream smb5-reg.h of
+the same silicon (Xiaomi spes tree, fetched by the agent; copies in
+`audit/charger/`) and the stock dtbo (SMB5 block layout, `auto-recharge-soc=98%`
+explains the old "status=Full at 98%").
+
+- **0046 `qcom_smb5`: charge control** (linux `4f00680fb`): new properties on the
+  USB supply — `voltage_max` (FV, CHGR+0x070, 10 mV steps), `constant_charge_current`
+  (FCC, CHGR+0x061, 50 mA steps), `input_current_limit` (ICL, USBIN+0x070) and
+  `charge_control_end_threshold` implemented by moving the float voltage along a
+  typical Li-ion curve (50 % = 3.80 V … 90 % = 4.05 V, 100 % = the boot-time FV,
+  saved at probe). Thresholds below 50 % rejected.
+- **0047 `cw2015`: proxy the threshold to the battery** (linux `161bff836`) —
+  UPower reads it from the Battery-typed supply. The get goes through
+  `get_property_from_supplier`; the set must reach the charger directly — the
+  first version recursed into itself (`rk_bat` is the cw2015's own supply, not the
+  charger!) and **panicked with a stack overflow** on the first write; fixed by
+  resolving the charger from `supplied_from` (the class wires it from the DT
+  `power-supplies` phandle).
+- Hardware test: `voltage_max` read 4.35 V (stock FV), FCC 2 A, ICL 1.5 A — all
+  real register reads. Threshold 80 → FV 3.95 V → **charging actually stopped**
+  (status Discharging; Vbat above the new float voltage); threshold 100 → FV
+  restored to 4.35 V. FCC 1 A/2 A writes round-trip exactly. Recharge after
+  termination waits for the voltage to sag — normal SMB behaviour.
+
+**Disk-boot hangs: the geni console.** Three disk boots of the 0046+ kernels hung
+before sshd (22-refused for 15+ min) while the identical kernel RAM-boots clean
+every time — the only difference in the cmdline being
+`earlycon=qcom_geni console=ttyMSM0` vs `earlycon=qcom_eud console=ttyEUD0`.
+Default cmdline moved to the EUD console (`mkboot.sh`); disk boot with it verified
+(ssh at ~160 s, sound card, gadget). The EUD console is also the only console
+left at all (the nanobridge UART is gone), and eudlog now sees the whole boot.
+
 
 
 ## Bluetooth audio (2026-10-31)

@@ -1,0 +1,248 @@
+From 4f00680fb310e4b262de0df27936bf97b4b3093d Mon Sep 17 00:00:00 2001
+From: sleeply4cat <sleeply4cat@gmail.com>
+Date: Sun, 15 Nov 2026 11:31:59 +0300
+Subject: [PATCH 46/47] power: qcom-smb5: charge control for the AuPad
+
+The driver so far only reported online/status.  Expose the knobs this
+hardware actually has (register map verified against the downstream
+smb5-reg.h of the same silicon, Xiaomi spes tree): the fast charge
+current (CHGR 0x061, 50 mA steps), the float voltage (CHGR 0x070, 10 mV
+steps), the USB input current limit (USBIN 0x070, 50 mA steps) and a
+charge_control_end_threshold implemented by moving the float voltage
+down along a typical Li-ion curve (50 % = 3.80 V .. 90 % = 4.05 V; 100 %
+restores the boot-time float voltage).  Thresholds below 50 % are
+rejected: a float voltage under 3.8 V terminates the charge far too
+early to be useful.
+---
+ drivers/power/supply/qcom_smb5.c | 172 +++++++++++++++++++++++++++++++
+ 1 file changed, 172 insertions(+)
+
+diff --git a/drivers/power/supply/qcom_smb5.c b/drivers/power/supply/qcom_smb5.c
+index 0a391f0eb..f9083039d 100644
+--- a/drivers/power/supply/qcom_smb5.c
++++ b/drivers/power/supply/qcom_smb5.c
+@@ -36,6 +36,22 @@
+ /* Below this the system is drawing more than the input gives */
+ #define DISCHARGE_THRESHOLD_UA		50000
+ 
++/*
++ * Charge-control registers (downstream smb5-reg.h, Xiaomi spes tree, same
++ * silicon): the fast charge current and the float voltage carry the only
++ * sane knobs this hardware has; the offsets are relative to chgr_base.
++ */
++#define FCC_CFG_REG			0x061	/* 50 mA steps, 0..8 A */
++#define FCC_STEP_UA			50000
++#define FV_CFG_REG			0x070	/* 10 mV steps, 3.6..4.79 V */
++#define FV_MIN_UV			3600000
++#define FV_STEP_UV			10000
++#define USBIN_BASE_OFFSET		0x300
++#define USBIN_ICL_CFG_REG		0x070	/* 50 mA steps, 0..5 A */
++#define ICL_STEP_UA			50000
++#define CHARGING_ENABLE_CMD_REG		0x042
++#define CHARGING_ENABLE_CMD_BIT		BIT(0)
++
+ enum smb5_charger_status {
+ 	INHIBIT_CHARGE = 0,
+ 	TRICKLE_CHARGE,
+@@ -54,6 +70,8 @@ struct smb5_chip {
+ 	u32 qg_base;
+ 	int ibat_lsb_na;
+ 	struct mutex qg_lock;	/* for the hold around the ADC read */
++	int eoc_pct;		/* charge_control_end_threshold, 50..100 */
++	int fv_saved_uv;	/* the boot-time float voltage, restored at 100 % */
+ };
+ 
+ static int smb5_read_ibat(struct smb5_chip *chip, int *raw)
+@@ -139,6 +157,109 @@ static int smb5_get_status(struct smb5_chip *chip, int *status)
+ 	return 0;
+ }
+ 
++/*
++ * The charge-control end threshold is implemented the way this class of
++ * charger can: by moving the float voltage down, which terminates the charge
++ * earlier.  The SoC points are a typical Li-ion curve; between them linear.
++ * 100 % restores the float voltage seen at boot.
++ */
++static const int eoc_fv_table[][2] = {
++	{ 50, 3800000 }, { 60, 3850000 }, { 70, 3900000 },
++	{ 80, 3950000 }, { 90, 4050000 },
++};
++
++static int smb5_get_fv(struct smb5_chip *chip, int *uv)
++{
++	unsigned int raw;
++	int rc;
++
++	rc = regmap_read(chip->regmap, chip->chgr_base + FV_CFG_REG, &raw);
++	if (rc)
++		return rc;
++
++	*uv = FV_MIN_UV + raw * FV_STEP_UV;
++	return 0;
++}
++
++static int smb5_set_fv(struct smb5_chip *chip, int uv)
++{
++	unsigned int raw;
++
++	uv = clamp(uv, FV_MIN_UV, 4790000);
++	raw = (uv - FV_MIN_UV) / FV_STEP_UV;
++	return regmap_write(chip->regmap, chip->chgr_base + FV_CFG_REG, raw);
++}
++
++static int smb5_get_icl(struct smb5_chip *chip, int *ua)
++{
++	unsigned int raw;
++	int rc;
++
++	rc = regmap_read(chip->regmap, chip->chgr_base + USBIN_BASE_OFFSET + USBIN_ICL_CFG_REG, &raw);
++	if (rc)
++		return rc;
++
++	*ua = raw * ICL_STEP_UA;
++	return 0;
++}
++
++static int smb5_set_icl(struct smb5_chip *chip, int ua)
++{
++	unsigned int raw;
++
++	ua = clamp(ua, 0, 5000000);
++	raw = ua / ICL_STEP_UA;
++	return regmap_write(chip->regmap, chip->chgr_base + USBIN_BASE_OFFSET + USBIN_ICL_CFG_REG, raw);
++}
++
++static int smb5_get_fcc(struct smb5_chip *chip, int *ua)
++{
++	unsigned int raw;
++	int rc;
++
++	rc = regmap_read(chip->regmap, chip->chgr_base + FCC_CFG_REG, &raw);
++	if (rc)
++		return rc;
++
++	*ua = raw * FCC_STEP_UA;
++	return 0;
++}
++
++static int smb5_set_fcc(struct smb5_chip *chip, int ua)
++{
++	unsigned int raw;
++
++	ua = clamp(ua, 0, 8000000);
++	raw = ua / FCC_STEP_UA;
++	return regmap_write(chip->regmap, chip->chgr_base + FCC_CFG_REG, raw);
++}
++
++static int smb5_set_eoc(struct smb5_chip *chip, int pct)
++{
++	int fv = chip->fv_saved_uv, rc;
++
++	if (pct < 50)
++		return -EINVAL;
++
++	for (int i = 0; i < ARRAY_SIZE(eoc_fv_table); i++) {
++		if (pct <= eoc_fv_table[i][0]) {
++			int lo = i ? eoc_fv_table[i - 1][0] : 50;
++			int lfv = i ? eoc_fv_table[i - 1][1] : eoc_fv_table[0][1];
++			int span = eoc_fv_table[i][0] - lo ?: 1;
++
++			fv = lfv + (eoc_fv_table[i][1] - lfv) * (pct - lo) / span;
++			break;
++		}
++	}
++
++	rc = smb5_set_fv(chip, fv);
++	if (rc)
++		return rc;
++
++	chip->eoc_pct = pct;
++	return 0;
++}
++
+ static int smb5_get_property(struct power_supply *psy,
+ 			     enum power_supply_property psp,
+ 			     union power_supply_propval *val)
+@@ -150,6 +271,35 @@ static int smb5_get_property(struct power_supply *psy,
+ 		return smb5_get_online(chip, &val->intval);
+ 	case POWER_SUPPLY_PROP_STATUS:
+ 		return smb5_get_status(chip, &val->intval);
++	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
++		val->intval = chip->eoc_pct;
++		return 0;
++	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
++		return smb5_get_fcc(chip, &val->intval);
++	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
++		return smb5_get_icl(chip, &val->intval);
++	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
++		return smb5_get_fv(chip, &val->intval);
++	default:
++		return -EINVAL;
++	}
++}
++
++static int smb5_set_property(struct power_supply *psy,
++			     enum power_supply_property psp,
++			     const union power_supply_propval *val)
++{
++	struct smb5_chip *chip = power_supply_get_drvdata(psy);
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
++		return smb5_set_eoc(chip, val->intval);
++	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
++		return smb5_set_fcc(chip, val->intval);
++	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
++		return smb5_set_icl(chip, val->intval);
++	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
++		return smb5_set_fv(chip, val->intval);
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -158,14 +308,29 @@ static int smb5_get_property(struct power_supply *psy,
+ static const enum power_supply_property smb5_properties[] = {
+ 	POWER_SUPPLY_PROP_ONLINE,
+ 	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
++	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
++	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
++	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+ };
+ 
++static int smb5_property_is_writeable(struct power_supply *psy,
++				      enum power_supply_property psp)
++{
++	return psp == POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD ||
++	       psp == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT ||
++	       psp == POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT ||
++	       psp == POWER_SUPPLY_PROP_VOLTAGE_MAX;
++}
++
+ static const struct power_supply_desc smb5_psy_desc = {
+ 	.name = "pm7250b-charger",
+ 	.type = POWER_SUPPLY_TYPE_USB,
+ 	.properties = smb5_properties,
+ 	.num_properties = ARRAY_SIZE(smb5_properties),
+ 	.get_property = smb5_get_property,
++	.set_property = smb5_set_property,
++	.property_is_writeable = smb5_property_is_writeable,
+ };
+ 
+ static int smb5_read_raw(struct iio_dev *indio_dev,
+@@ -252,6 +417,13 @@ static int smb5_probe(struct platform_device *pdev)
+ 	if (rc)
+ 		return dev_err_probe(dev, rc, "Couldn't register IIO device\n");
+ 
++	/* The boot-time float voltage (stock firmware's own choice) becomes the
++	 * 100 % end-threshold reference */
++	rc = smb5_get_fv(chip, &chip->fv_saved_uv);
++	if (rc)
++		return dev_err_probe(dev, rc, "Couldn't read float voltage\n");
++	chip->eoc_pct = 100;
++
+ 	psy_cfg.drv_data = chip;
+ 	psy_cfg.fwnode = dev_fwnode(dev);
+ 
+-- 
+2.43.0
+

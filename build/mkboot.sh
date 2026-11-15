@@ -9,7 +9,11 @@ IMG=${1:-$HERE/boot-mainline.img}
 # clk/pd_ignore_unused dropped 2026-11-15: with the smd-rpm handoff votes gone
 # (0045) audio comes up at boot and the GPU survives suspend cycles clean
 # (PORT.md, "Power day 3").
-CMDLINE=${CMDLINE:-"earlycon=qcom_geni,0x4a90000 console=ttyMSM0,115200n8 ignore_loglevel rdinit=/init panic=10"}
+# Console on the EUD COM 2026-11-15: disk boots with console=ttyMSM0 (geni UART,
+# no receiver) hang before sshd on the 0046+ kernels three times in a row while
+# the identical kernel RAM-boots clean with the EUD console - and the EUD console
+# is the only visible console left (the nanobridge UART is gone).
+CMDLINE=${CMDLINE:-"earlycon=qcom_eud,0x1610000 console=ttyEUD0,115200n8 ignore_loglevel rdinit=/init panic=10 root=pmos nokaslr"}
 
 # Two console modes on the EUD COM, never both: keep_bootcon keeps the boot console and
 # console=ttyEUD0 hands over to the real one; together they leave two writers on one FIFO.

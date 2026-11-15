@@ -1,0 +1,80 @@
+From bb59cf968515dc69596bed890bb31e4aecc7129c Mon Sep 17 00:00:00 2001
+From: sleeply4cat <sleeply4cat@gmail.com>
+Date: Sun, 15 Nov 2026 11:31:59 +0300
+Subject: [PATCH 47/47] power: cw2015: forward the charge-control end threshold
+ to the charger
+
+UPower reads charge_control_end_threshold from the Battery-typed supply,
+so proxy the property from the cw2015 battery to its SMB5 charger
+(power-supplies in the DT); the getter goes through the existing
+get_property_from_supplier helper, the setter calls the charger's
+set_property directly (7.3.1 has no set_property_from_supplier).
+---
+ drivers/power/supply/cw2015_battery.c | 31 +++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/drivers/power/supply/cw2015_battery.c b/drivers/power/supply/cw2015_battery.c
+index 181fad4ac..4b2fefc84 100644
+--- a/drivers/power/supply/cw2015_battery.c
++++ b/drivers/power/supply/cw2015_battery.c
+@@ -553,12 +553,40 @@ static int cw_battery_get_property(struct power_supply *psy,
+ 
+ 		break;
+ 
++	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
++		/* The SMB5 charger implements the limit by moving the float
++		 * voltage; forward so userspace sees it on the battery */
++		return power_supply_get_property_from_supplier(cw_bat->rk_bat,
++							       psp, val);
++
+ 	default:
+ 		break;
+ 	}
+ 	return 0;
+ }
+ 
++static int cw_battery_set_property(struct power_supply *psy,
++				   enum power_supply_property psp,
++				   const union power_supply_propval *val)
++{
++	struct cw_battery *cw_bat = power_supply_get_drvdata(psy);
++
++	if (psp != POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD)
++		return -EINVAL;
++
++	if (!cw_bat->rk_bat || !cw_bat->rk_bat->desc ||
++	    !cw_bat->rk_bat->desc->set_property)
++		return -ENODEV;
++
++	return cw_bat->rk_bat->desc->set_property(cw_bat->rk_bat, psp, val);
++}
++
++static int cw_battery_property_is_writeable(struct power_supply *psy,
++					    enum power_supply_property psp)
++{
++	return psp == POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD;
++}
++
+ static enum power_supply_property cw_battery_properties[] = {
+ 	POWER_SUPPLY_PROP_CAPACITY,
+ 	POWER_SUPPLY_PROP_STATUS,
+@@ -571,6 +599,7 @@ static enum power_supply_property cw_battery_properties[] = {
+ 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+ 	POWER_SUPPLY_PROP_CHARGE_NOW,
+ 	POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
+ };
+ 
+ static const struct power_supply_desc cw2015_bat_desc = {
+@@ -579,6 +608,8 @@ static const struct power_supply_desc cw2015_bat_desc = {
+ 	.properties	= cw_battery_properties,
+ 	.num_properties	= ARRAY_SIZE(cw_battery_properties),
+ 	.get_property	= cw_battery_get_property,
++	.set_property	= cw_battery_set_property,
++	.property_is_writeable = cw_battery_property_is_writeable,
+ };
+ 
+ static int cw2015_parse_properties(struct cw_battery *cw_bat)
+-- 
+2.43.0
+
