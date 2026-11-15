@@ -327,6 +327,16 @@ byte decomposition, DOWNSTREAM-DECODE.md — the agent's research, misc backup).
   never right after `kup.sh` (it reboots). `modprobe` "not found" with all files present
   = stale `modules.dep` — `depmod -a` on the tablet. kmod 34.2 on pmOS.
 
+**Both cmdline flags dropped (same day, after 0045).** Rebuilt without
+`clk_ignore_unused pd_ignore_unused`: boot healthy — sound card registers (no
+`can't create pcm: -110`), remoteprocs up, two full hook suspend cycles clean,
+`hangcheck` count 0, no GPU lockups, gadget rebinds. The Nov-13 no-flags
+failures (audio -110 at boot, GPU lockup after resume) are cured by the fixes
+since — 0045 (no more INT_MAX proxy votes on the smd-rpm bus clocks) is the
+prime suspect. `mkboot.sh` default CMDLINE is flagless now; the flags can still
+be added back ad hoc for debugging. Note the full pmOS boot (OpenRC to sshd)
+takes ~2 min — ssh loops that give up earlier look like dead boots.
+
 
 
 ## Bluetooth audio (2026-10-31)

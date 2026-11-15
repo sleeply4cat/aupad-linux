@@ -6,7 +6,10 @@ HERE=$(dirname "$(readlink -f "$0")")
 OUT=$HERE/out
 export AUPAD_BUILD=$HERE
 IMG=${1:-$HERE/boot-mainline.img}
-CMDLINE=${CMDLINE:-"earlycon=qcom_geni,0x4a90000 console=ttyMSM0,115200n8 ignore_loglevel clk_ignore_unused pd_ignore_unused rdinit=/init panic=10"}
+# clk/pd_ignore_unused dropped 2026-11-15: with the smd-rpm handoff votes gone
+# (0045) audio comes up at boot and the GPU survives suspend cycles clean
+# (PORT.md, "Power day 3").
+CMDLINE=${CMDLINE:-"earlycon=qcom_geni,0x4a90000 console=ttyMSM0,115200n8 ignore_loglevel rdinit=/init panic=10"}
 
 # Two console modes on the EUD COM, never both: keep_bootcon keeps the boot console and
 # console=ttyEUD0 hands over to the real one; together they leave two writers on one FIFO.
